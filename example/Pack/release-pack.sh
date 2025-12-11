@@ -2,7 +2,7 @@ rm -rf pack_example
 mkdir pack_example && cd pack_example
 
 cp ../example/Pack/adder_trans.sv .
-picker pack adder_trans -e
+picker pack adder_trans.sv -e
 
 if [ "$1" = "both" ]; then
     cd adder_trans/example && make 

@@ -1,5 +1,14 @@
-PYTHON_INCLUDE:="/usr/include/python3.6m"
+PYTHON_INCLUDE:=$(firstword $(shell python3-config --includes))
 XSP_COMM_INCLUDE:="{{__XSPCOMM_INCLUDE__}}"
+
+# Path management
+AGENT_DIR := $(CURDIR)
+TEMPLATE_DIR := $(dir $(AGENT_DIR))
+BUILD_DIR := build
+OBJ_DIR := $(BUILD_DIR)/obj
+BIN_DIR := $(BUILD_DIR)/bin
+
+# Validate required environment variables
 ifndef UVMC_HOME
 $(error UVMC_HOME is not set)
 endif
@@ -45,11 +54,11 @@ all:
 
 clean:
 	rm -rf simv* work csrc ucli.key vc_hdrs.h vcs.log AN* *.log *.log.cmp *.vpd DVE* .vlogan* _tlm_pbsb* tlm_pbsb.py  tlmps.cpp  tlmps.h __pycache__
-
+	rm -rf $(BUILD_DIR)
 
 comp:
 	swig -D'MODULE_NAME="tlm_pbsb"' -python -c++ -DUSE_VCS -I${XSP_COMM_INCLUDE} -o tlmps.cpp ${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
-	$(SYSCAN) -full64 -cflags -DUSE_VCS -cflags -I${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE} ${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp tlmps.cpp
+	$(SYSCAN) -full64 -cflags -DUSE_VCS -cflags ${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE} ${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp tlmps.cpp
 	$(VLOGAN) -full64 +incdir+common example_uvm.sv +define+UVM_OBJECT_MUST_HAVE_CONSTRUCTOR
 	$(VCS_ELAB) -e VcsMain -full64 sv_main ${VCS_HOME}/linux64/lib/vcs_tls.o -slave
 	mv simv _tlm_pbsb.so

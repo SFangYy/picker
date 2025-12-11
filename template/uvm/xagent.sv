@@ -10,34 +10,65 @@
 
 class {{className}}_xmonitor extends uvm_monitor;
     `uvm_component_utils({{className}}_xmonitor)
+    
+    // Parameters for timing and configuration
+    localparam real TIME_UNIT = 1e-12;        // Time precision
+    localparam real TRANSPORT_DELAY = 1e-9;   // Transport delay
+    
+    // Member variables with consistent naming
     uvm_tlm_b_initiator_socket #()     out;
-    byte unsigned                      transport_tr[];
-    byte unsigned                      transport_queue[];
-    uvm_tlm_gp                         transport_msg;
-    uvm_tlm_time                       delay;
-    int                                remaining_bits;
-    logic[7:0]                         myByte;
-    bit                                exist_xmonitor;
-    {{className}}                      tr;
+    byte unsigned                      m_transport_data[];
+    byte unsigned                      m_transport_queue[];
+    uvm_tlm_gp                         m_transport_msg;
+    uvm_tlm_time                       m_delay;
+    bit                                m_exist_xmonitor;
+    {{className}}                      m_tr;
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
-        uvm_config_db#(bit)::get(this,"","{{className}}_exist_xmonitor",exist_xmonitor);
-        if(exist_xmonitor) begin
+        uvm_config_db#(bit)::get(this,"","{{className}}_exist_xmonitor",m_exist_xmonitor);
+        if(m_exist_xmonitor) begin
             out = new("out",this);
         end
         
-        transport_msg = new;
-        delay = new("del",1e-12);
-        myByte = 8'b00000000;
+        m_transport_msg = new;
+        m_delay = new("delay", TIME_UNIT);
     endfunction
+
+    // Uses parameterized max width for better flexibility
+    parameter int MAX_FIELD_WIDTH = 2048;  // Configurable maximum field width
+    
+    task automatic serialize_field(
+        input bit [MAX_FIELD_WIDTH-1:0] data, 
+        input int bit_count, 
+        ref byte unsigned transport_array[]
+    );
+        int l_remaining_bits;
+        logic[7:0] l_byte_buffer;
+        
+        l_remaining_bits = bit_count % 8;
+        
+        // Handle remaining bits (non-byte-aligned)
+        if(l_remaining_bits != 0) begin
+            l_byte_buffer = 8'b00000000;
+            for(int i = 0; i < l_remaining_bits; i++) begin
+                l_byte_buffer[l_remaining_bits - i - 1] = data[bit_count - 1 - i];
+            end
+            transport_array = {transport_array, l_byte_buffer};
+        end
+        
+        // Handle complete bytes
+        for(int i = 0; i < bit_count / 8; i++) begin
+            transport_array = {transport_array, data[(bit_count - 1 - l_remaining_bits - i*8) -: 8]};
+        end
+    endtask
 
     
     virtual task run_phase(uvm_phase phase);
         while(1) begin
-            tr = new("tr");
-            sequence_send(tr);
-            send_tr(tr);    
+            m_tr = new("tr");
+            sequence_send(m_tr);
+            send_tr(m_tr);    
         end
     endtask
 
@@ -47,108 +78,64 @@ class {{className}}_xmonitor extends uvm_monitor;
     endtask
 
     task send_tr({{className}} {{className}}item);
-        //initial item
-        transport_tr = {};
+        // Initialize transaction data
+        m_transport_data = {};
+        
         {% set counter =  0 -%}
         {%for data in variables -%}
         {%if data.nums == 1 -%}
         {% set counter = counter + 1 -%}
-        transport_tr = {transport_tr,{{className}}item.{{data.name}}};
-        
+        m_transport_data = {m_transport_data, {{className}}item.{{data.name}}};
         {%else -%}
         {%if data.macro == 1 -%}
-        remaining_bits = {{data.macro_name}} % 8;
-        if(remaining_bits != 0) begin
-            myByte = 8'b00000000; 
-            for(int i = 0;i<remaining_bits;i++)begin
-                myByte[remaining_bits -i-1] = {{className}}item.{{data.name}}[{{data.macro_name}}-1-i];
-            end
-            transport_tr = {transport_tr,myByte};
-        end
-        
-        for(int i = 0;i < {{data.macro_name}}/8;i++) begin
-            transport_tr = {transport_tr,{{className}}item.{{data.name}}[({{data.macro_name}} - 1 - remaining_bits -i*8)-:8]};
+        serialize_field({{className}}item.{{data.name}}, {{data.macro_name}}, m_transport_data);
         {% set counter = counter + 1 -%}
-        end        
         {%else -%}
-        remaining_bits = {{data.bit_count}} % 8;
-        if(remaining_bits != 0) begin
-            myByte = 8'b00000000; 
-            for(int i = 0;i<remaining_bits;i++)begin
-                myByte[remaining_bits -i-1] = {{className}}item.{{data.name}}[{{data.bit_count}}-1-i];
-            end
-            transport_tr = {transport_tr,myByte};
-        end
-        
-        for(int i = 0;i < {{data.bit_count}}/8;i++) begin
-            transport_tr = {transport_tr,{{className}}item.{{data.name}}[({{data.bit_count}} - 1 - remaining_bits -i*8)-:8]};
+        serialize_field({{className}}item.{{data.name}}, {{data.bit_count}}, m_transport_data);
         {% set counter = counter + 1 -%}
-        end
         {%endif -%}
         {%endif -%}
         {%endfor -%}
-        transport_msg.set_data_length(transport_tr.size());
-        transport_msg.set_data(transport_tr);
-        delay.set_abstime(0,1e-9);
-        if(exist_xmonitor) begin
-            out.b_transport(transport_msg,delay);
+        
+        m_transport_msg.set_data_length(m_transport_data.size());
+        m_transport_msg.set_data(m_transport_data);
+        m_delay.set_abstime(0, TRANSPORT_DELAY);
+        if(m_exist_xmonitor) begin
+            out.b_transport(m_transport_msg, m_delay);
         end
-
     endtask
 
     task send_transaction({{className}} {{className}}item, logic is_last);
-        transport_tr = {};
+        byte unsigned l_temp_data[];
+        l_temp_data = {};
+        
         {% set counter =  0 -%}
         {%for data in variables -%}
         {%if data.nums == 1 -%}
         {% set counter = counter + 1 -%}
-        transport_tr = {transport_tr,{{className}}item.{{data.name}}};
-        
+        l_temp_data = {l_temp_data, {{className}}item.{{data.name}}};
         {%else -%}
         {%if data.macro == 1 -%}
-        remaining_bits = {{data.macro_name}} % 8;
-        if(remaining_bits != 0) begin
-            myByte = 8'b00000000; 
-            for(int i = 0;i<remaining_bits;i++)begin
-                myByte[remaining_bits -i-1] = {{className}}item.{{data.name}}[{{data.macro_name}}-1-i];
-            end
-            transport_tr = {transport_tr,myByte};
-        end
-        
-        for(int i = 0;i < {{data.macro_name}}/8;i++) begin
-            transport_tr = {transport_tr,{{className}}item.{{data.name}}[({{data.macro_name}} - 1 - remaining_bits -i*8)-:8]};
+        serialize_field({{className}}item.{{data.name}}, {{data.macro_name}}, l_temp_data);
         {% set counter = counter + 1 -%}
-        end        
         {%else -%}
-        remaining_bits = {{data.bit_count}} % 8;
-        if(remaining_bits != 0) begin
-            myByte = 8'b00000000; 
-            for(int i = 0;i<remaining_bits;i++)begin
-                myByte[remaining_bits -i-1] = {{className}}item.{{data.name}}[{{data.bit_count}}-1-i];
-            end
-            transport_tr = {transport_tr,myByte};
-        end
-        
-        for(int i = 0;i < {{data.bit_count}}/8;i++) begin
-            transport_tr = {transport_tr,{{className}}item.{{data.name}}[({{data.bit_count}} - 1 - remaining_bits -i*8)-:8]};
+        serialize_field({{className}}item.{{data.name}}, {{data.bit_count}}, l_temp_data);
         {% set counter = counter + 1 -%}
-        end
         {%endif -%}
         {%endif -%}
         {%endfor -%}
-        send_msg(transport_tr, is_last);
-
+        send_msg(l_temp_data, is_last);
     endtask
 
     task send_msg(byte unsigned tr[], logic is_last);
-        for(int i = 0; i < tr.size(); i++)begin
-            transport_queue = {transport_queue,tr[i]};
+        for(int i = 0; i < tr.size(); i++) begin
+            m_transport_queue = {m_transport_queue, tr[i]};
         end
         if(is_last) begin
-            transport_msg.set_data_length(transport_queue.size());
-            transport_msg.set_data(transport_queue);
-            out.b_transport(transport_msg,delay);
-            transport_queue = {};
+            m_transport_msg.set_data_length(m_transport_queue.size());
+            m_transport_msg.set_data(m_transport_queue);
+            out.b_transport(m_transport_msg, m_delay);
+            m_transport_queue = {};
         end
     endtask
 
@@ -156,42 +143,47 @@ endclass
     
     
 class {{className}}_xdriver extends uvm_driver;
-    `uvm_component_utils({{className}}_xdriver) 
-    uvm_tlm_gp                         transport_msg;
-    uvm_tlm_time                       delay;
-    byte unsigned                      transport_tr[];
-    bit                                exist_xdriver;
+    `uvm_component_utils({{className}}_xdriver)
+    
+    // Parameters for timing
+    localparam real TIME_UNIT = 1e-12;
+    
+    // Member variables
+    uvm_tlm_gp                         m_transport_msg;
+    uvm_tlm_time                       m_delay;
+    byte unsigned                      m_transport_data[];
+    bit                                m_exist_xdriver;
     uvm_tlm_b_target_socket #({{className}}_xdriver)        in;
-    {{className}} tr;
+    {{className}}                      m_tr;
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
-        if(!uvm_config_db#(bit)::get(this,"","{{className}}_exist_xdriver",exist_xdriver)) begin
+        if(!uvm_config_db#(bit)::get(this,"","{{className}}_exist_xdriver",m_exist_xdriver)) begin
             `uvm_fatal("CFGERR", "Could not get monitor or driver type")
         end
-        if(exist_xdriver) begin
+        if(m_exist_xdriver) begin
             in = new("in",this);
         end
         
-        transport_msg = new("transport_msg");
-        delay = new("del",1e-12);
+        m_transport_msg = new("transport_msg");
+        m_delay = new("delay", TIME_UNIT);
     endfunction
         
 
-    virtual task b_transport(uvm_tlm_gp t,uvm_tlm_time delay);
-        tr = new("tr");
-        t.get_data(transport_tr);
+    virtual task b_transport(uvm_tlm_gp t, uvm_tlm_time delay);
+        m_tr = new("tr");
+        t.get_data(m_transport_data);
         {% set counter =  0 -%}
         {%for data in variables -%}
         {%if data.nums == 1 -%}
-        tr.{{data.name}} = transport_tr[{{counter}}];
+        m_tr.{{data.name}} = m_transport_data[{{counter}}];
         {% set counter = counter + 1 -%}
         {%else -%}
-        tr.{{data.name}} ={ {%for i in range(data.nums) -%}transport_tr[{{counter}}]{%if not loop.is_last -%},{%endif -%}{% set counter = counter + 1 -%} {% endfor -%} };
+        m_tr.{{data.name}} = { {%for i in range(data.nums) -%}m_transport_data[{{counter}}]{%if not loop.is_last -%},{%endif -%}{% set counter = counter + 1 -%} {% endfor -%} };
         {%endif -%}
         {%endfor -%}
         delay.reset();
-        sequence_receive(tr);
+        sequence_receive(m_tr);
     endtask
 
     virtual function sequence_receive({{className}} tr);
