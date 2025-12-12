@@ -63,8 +63,27 @@ comp:
 	$(VCS_ELAB) -e VcsMain -full64 sv_main ${VCS_HOME}/linux64/lib/vcs_tls.o -slave
 	mv simv _tlm_pbsb.so
 	mv simv.daidir _tlm_pbsb.so.daidir
+
+# Compile DUT example (if generated with --generate-dut)
+comp_dut:
+	swig -D'MODULE_NAME="tlm_pbsb"' -python -c++ -DUSE_VCS -I${XSP_COMM_INCLUDE} -o tlmps.cpp ${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
+	$(SYSCAN) -full64 -cflags -DUSE_VCS -cflags ${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE} ${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp tlmps.cpp
+	$(VLOGAN) -full64 +incdir+common example_uvm_dut.sv +define+UVM_OBJECT_MUST_HAVE_CONSTRUCTOR
+	$(VCS_ELAB) -e VcsMain -full64 sv_main ${VCS_HOME}/linux64/lib/vcs_tls.o -slave
+	mv simv _tlm_pbsb.so
+	mv simv.daidir _tlm_pbsb.so.daidir
+
 copy_xspcomm:
 	@echo "Try copy python module: xspcomm"
 	@cp -r {{__XSPCOMM_PYTHON__}} xspcomm
 run:	
 	LD_PRELOAD=./_tlm_pbsb.so python3 example_python.py
+
+# Run DUT example (if generated with --generate-dut)
+run_dut:
+	@if [ -f example_dut.py ]; then \
+		echo "Running DUT example..."; \
+		LD_PRELOAD=./_tlm_pbsb.so python3 example_dut.py; \
+	else \
+		echo "example_dut.py not found. Generate with --generate-dut flag."; \
+	fi

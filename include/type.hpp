@@ -53,6 +53,7 @@ typedef struct pack_opts {
     std::vector<std::string> rename;
     bool example;
     bool force;
+    bool generate_dut;
 } pack_opts;
 
 typedef struct sv_signal_define {

@@ -63,9 +63,22 @@ namespace picker { namespace codegen {
         std::string template_path = picker::get_template_path();
         gen_uvm_code(data, template_path + "/uvm/xagent.py", filename + "/" + filename + "_xagent" + ".py");
         gen_uvm_code(data, template_path + "/uvm/xagent.sv", filename + "/" + filename + "_xagent.sv");
-        gen_uvm_code(data, template_path + "/uvm/example_python.py", filename + "/example/" + "example_python.py");
-        gen_uvm_code(data, template_path + "/uvm/example_uvm.sv", filename + "/example/" + "example_uvm.sv");
-        gen_uvm_code(data, template_path + "/uvm/Makefile", filename + "/example/" + "Makefile");
+        
+        // Generate DUT class if requested
+        if (opts.generate_dut) {
+            gen_uvm_code(data, template_path + "/uvm/xdut.py", filename + "/" + "DUT" + filename + ".py");
+            if (opts.example) {
+                gen_uvm_code(data, template_path + "/uvm/example_dut.py", filename + "/example/" + "example_dut.py");
+                gen_uvm_code(data, template_path + "/uvm/example_uvm_dut.sv", filename + "/example/" + "example_uvm_dut.sv");
+            }
+        }
+        
+        if (opts.example) {
+            gen_uvm_code(data, template_path + "/uvm/example_python.py", filename + "/example/" + "example_python.py");
+            gen_uvm_code(data, template_path + "/uvm/example_uvm.sv", filename + "/example/" + "example_uvm.sv");
+            gen_uvm_code(data, template_path + "/uvm/Makefile", filename + "/example/" + "Makefile");
+        }
+        
         std::cout << "generate " + filename + " code successfully." << std::endl;
     }
 
