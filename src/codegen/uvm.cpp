@@ -19,17 +19,34 @@ namespace picker { namespace codegen {
     // namespace sv
     void gen_uvm_param(picker::pack_opts &opts, uvm_transaction_define transaction, std::string filename)
     {
-        std::string folderPath = filename;
-        if (std::filesystem::exists(filename) && !opts.force) {
+        // New directory structure:
+        // <TransactionName>/                    <- Top level folder
+        //   ├── Makefile
+        //   ├── example_dut.py
+        //   ├── example_uvm_dut.sv
+        //   └── DUT<TransactionName>/          <- Python module package
+        //       ├── __init__.py
+        //       ├── DUT<TransactionName>.py
+        //       ├── <TransactionName>_xagent.py
+        //       ├── <TransactionName>_xagent.sv
+        //       ├── xspcomm/
+        //       └── csrc/                       <- Build artifacts
+        
+        std::string topFolder = filename;  // Top level: <TransactionName>/
+        std::string dutModule = topFolder + "/DUT" + filename;  // Module: DUT<TransactionName>/
+        std::string csrcFolder = dutModule + "/csrc";  // Build folder
+        
+        // Check if top folder exists
+        if (std::filesystem::exists(topFolder) && !opts.force) {
             PK_MESSAGE("folder already exists");
             exit(0);
         } else {
-            if (std::filesystem::exists(filename)) {
-                std::filesystem::path folderPath = filename;
-                std::filesystem::remove_all(filename);
+            if (std::filesystem::exists(topFolder)) {
+                std::filesystem::remove_all(topFolder);
             }
-            std::filesystem::create_directory(filename);
-            if (opts.example) { std::filesystem::create_directory(filename + "/example"); }
+            // Create directory structure
+            std::filesystem::create_directories(dutModule);
+            std::filesystem::create_directories(csrcFolder);
         }
 
         inja::json data;
@@ -61,22 +78,22 @@ namespace picker { namespace codegen {
         }
         data["byte_stream_count"] = byte_stream_count;
         std::string template_path = picker::get_template_path();
-        gen_uvm_code(data, template_path + "/uvm/xagent.py", filename + "/" + filename + "_xagent" + ".py");
-        gen_uvm_code(data, template_path + "/uvm/xagent.sv", filename + "/" + filename + "_xagent.sv");
         
-        // Generate DUT class if requested
+        // Generate core module files in DUT<TransactionName>/
+        gen_uvm_code(data, template_path + "/uvm/xagent.py", dutModule + "/" + filename + "_xagent.py");
+        gen_uvm_code(data, template_path + "/uvm/xagent.sv", dutModule + "/" + filename + "_xagent.sv");
+        gen_uvm_code(data, template_path + "/uvm/__init__.py", dutModule + "/__init__.py");
+        
+        // Generate DUT class if requested (always in -d mode based on requirements)
         if (opts.generate_dut) {
-            gen_uvm_code(data, template_path + "/uvm/xdut.py", filename + "/" + "DUT" + filename + ".py");
-            if (opts.example) {
-                gen_uvm_code(data, template_path + "/uvm/example_dut.py", filename + "/example/" + "example_dut.py");
-                gen_uvm_code(data, template_path + "/uvm/example_uvm_dut.sv", filename + "/example/" + "example_uvm_dut.sv");
-            }
+            gen_uvm_code(data, template_path + "/uvm/xdut.py", dutModule + "/DUT" + filename + ".py");
         }
         
+        // Generate example files in top folder
         if (opts.example) {
-            gen_uvm_code(data, template_path + "/uvm/example_python.py", filename + "/example/" + "example_python.py");
-            gen_uvm_code(data, template_path + "/uvm/example_uvm.sv", filename + "/example/" + "example_uvm.sv");
-            gen_uvm_code(data, template_path + "/uvm/Makefile", filename + "/example/" + "Makefile");
+            gen_uvm_code(data, template_path + "/uvm/example_dut.py", topFolder + "/example_dut.py");
+            gen_uvm_code(data, template_path + "/uvm/example_uvm_dut.sv", topFolder + "/example_uvm_dut.sv");
+            gen_uvm_code(data, template_path + "/uvm/Makefile", topFolder + "/Makefile");
         }
         
         std::cout << "generate " + filename + " code successfully." << std::endl;

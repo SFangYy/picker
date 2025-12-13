@@ -7,6 +7,9 @@
 // Version    : {{version}}
 //==============================================================================//
 
+// Include the transaction definition
+// Note: The transaction file should be in the same directory
+`include "{{filepath}}"
 
 class {{className}}_xmonitor extends uvm_monitor;
     `uvm_component_utils({{className}}_xmonitor)
@@ -65,16 +68,19 @@ class {{className}}_xmonitor extends uvm_monitor;
 
     
     virtual task run_phase(uvm_phase phase);
-        while(1) begin
-            m_tr = new("tr");
-            sequence_send(m_tr);
-            send_tr(m_tr);    
+        // Monitor should not actively send transactions in DUT mode
+        // It should only respond when explicitly driven by sequence_send
+        // For DUT pack mode, monitor echoes back what driver receives
+        forever begin
+            #100;  // Wait indefinitely, only send when explicitly called
         end
     endtask
 
 
     virtual task sequence_send({{className}} tr);
-
+        // This task is called by external logic to send specific transaction
+        // For DUT pack mode, this should echo the received driver data
+        send_tr(tr);
     endtask
 
     task send_tr({{className}} {{className}}item);
@@ -155,6 +161,7 @@ class {{className}}_xdriver extends uvm_driver;
     bit                                m_exist_xdriver;
     uvm_tlm_b_target_socket #({{className}}_xdriver)        in;
     {{className}}                      m_tr;
+    {{className}}_xmonitor             mon_handle;  // Handle to monitor for echo back
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
@@ -186,9 +193,9 @@ class {{className}}_xdriver extends uvm_driver;
         sequence_receive(m_tr);
     endtask
 
-    virtual function sequence_receive({{className}} tr);
-
-    endfunction
+    virtual task sequence_receive({{className}} tr);
+        // Override this task in derived class
+    endtask
 endclass
 
 

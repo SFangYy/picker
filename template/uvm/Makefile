@@ -1,12 +1,13 @@
 PYTHON_INCLUDE:=$(firstword $(shell python3-config --includes))
 XSP_COMM_INCLUDE:="{{__XSPCOMM_INCLUDE__}}"
 
-# Path management
-AGENT_DIR := $(CURDIR)
-TEMPLATE_DIR := $(dir $(AGENT_DIR))
-BUILD_DIR := build
-OBJ_DIR := $(BUILD_DIR)/obj
-BIN_DIR := $(BUILD_DIR)/bin
+# Path management for new structure
+# Top folder: <TransactionName>/
+# Module folder: <TransactionName>/DUT<TransactionName>/
+# Build folder: <TransactionName>/DUT<TransactionName>/csrc/
+TOP_DIR := $(CURDIR)
+DUT_MODULE := DUT{{className}}
+BUILD_DIR := $(DUT_MODULE)/csrc
 
 # Validate required environment variables
 ifndef UVMC_HOME
@@ -30,17 +31,19 @@ VERBOSE=+UVM_VERBOSITY=UVM_MEDIUM
 
 SYSCAN  = syscan -cpp g++ -cc gcc -full64 -cflags -g -cflags -DVCS -cflags -I. \
                 -tlm2 -cflags -I${VCS_HOME}/include/systemc232/tlm_utils \
-                -cflags -I${UVMC_HOME}/src/connect/sc ${UVMC_HOME}/src/connect/sc/uvmc.cpp
+                -cflags -I${UVMC_HOME}/src/connect/sc ${UVMC_HOME}/src/connect/sc/uvmc.cpp \
+                -cflags -DUSE_VCS -cflags ${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE}
 
-VLOGAN  = vlogan -q \
+VLOGAN  = vlogan -q -full64 \
          -sverilog +incdir+${UVM_HOME}/src ${UVM_HOME}/src/uvm_pkg.sv \
         +incdir+${UVMC_HOME}/src/connect/sv ${UVMC_HOME}/src/connect/sv/uvmc_pkg.sv \
-         -timescale=1ns/1ps \
+         -timescale=1ns/1ps +define+UVM_OBJECT_MUST_HAVE_CONSTRUCTOR \
 
 VCS_ELAB = vcs -sysc=deltasync -lca \
         -full64 -sysc -cpp g++ -cc gcc \
         -timescale=1ns/1ps \
-        -CFLAGS -DVCS ${UVM_HOME}/src/dpi/uvm_dpi.cc
+        -CFLAGS -DVCS ${UVM_HOME}/src/dpi/uvm_dpi.cc \
+        -e VcsMain sv_main ${VCS_HOME}/linux64/lib/vcs_tls.o -slave
 
 VCS    = vcs -q -sysc=deltasync -lca -full64 \
         -sverilog +incdir+${UVM_HOME}/src ${UVM_HOME}/src/uvm_pkg.sv \
@@ -49,41 +52,52 @@ VCS    = vcs -q -sysc=deltasync -lca -full64 \
         -sysc -cpp g++ -cc gcc \
         -CFLAGS -DVCS ${UVM_HOME}/src/dpi/uvm_dpi.cc
 
-all: 
-	make clean comp copy_xspcomm run 
+# Default target: compile and run
+all: clean comp copy_xspcomm run
 
 clean:
-	rm -rf simv* work csrc ucli.key vc_hdrs.h vcs.log AN* *.log *.log.cmp *.vpd DVE* .vlogan* _tlm_pbsb* tlm_pbsb.py  tlmps.cpp  tlmps.h __pycache__
-	rm -rf $(BUILD_DIR)
+	@echo "Cleaning build artifacts..."
+	rm -rf $(DUT_MODULE)/csrc $(DUT_MODULE)/work $(DUT_MODULE)/.vlogan*
+	rm -rf $(DUT_MODULE)/_tlm_pbsb.so* $(DUT_MODULE)/simv* 
+	rm -rf $(DUT_MODULE)/ucli.key $(DUT_MODULE)/vc_hdrs.h 
+	rm -rf $(DUT_MODULE)/vcs.log $(DUT_MODULE)/AN* $(DUT_MODULE)/*.log 
+	rm -rf $(DUT_MODULE)/*.log.cmp $(DUT_MODULE)/*.vpd $(DUT_MODULE)/DVE*
+	rm -rf $(DUT_MODULE)/tlm_pbsb.py
+	rm -rf __pycache__ $(DUT_MODULE)/__pycache__
+	@echo "Clean complete."
 
+# Compile target (unified for both regular and DUT mode)
 comp:
-	swig -D'MODULE_NAME="tlm_pbsb"' -python -c++ -DUSE_VCS -I${XSP_COMM_INCLUDE} -o tlmps.cpp ${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
-	$(SYSCAN) -full64 -cflags -DUSE_VCS -cflags ${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE} ${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp tlmps.cpp
-	$(VLOGAN) -full64 +incdir+common example_uvm.sv +define+UVM_OBJECT_MUST_HAVE_CONSTRUCTOR
-	$(VCS_ELAB) -e VcsMain -full64 sv_main ${VCS_HOME}/linux64/lib/vcs_tls.o -slave
-	mv simv _tlm_pbsb.so
-	mv simv.daidir _tlm_pbsb.so.daidir
+	@mkdir -p $(BUILD_DIR)
+	swig -D'MODULE_NAME="tlm_pbsb"' -python -c++ -DUSE_VCS -I${XSP_COMM_INCLUDE} \
+		-outdir $(DUT_MODULE) -o $(BUILD_DIR)/tlmps.cpp \
+		${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
+	$(SYSCAN) -Mdir=$(DUT_MODULE)/csrc \
+		${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp $(BUILD_DIR)/tlmps.cpp
+	$(VLOGAN) +incdir+$(DUT_MODULE) example_uvm_dut.sv -Mdir=$(DUT_MODULE)/csrc
+	$(VCS_ELAB) -o $(DUT_MODULE)/_tlm_pbsb.so -Mdir=$(DUT_MODULE)/csrc
 
-# Compile DUT example (if generated with --generate-dut)
-comp_dut:
-	swig -D'MODULE_NAME="tlm_pbsb"' -python -c++ -DUSE_VCS -I${XSP_COMM_INCLUDE} -o tlmps.cpp ${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
-	$(SYSCAN) -full64 -cflags -DUSE_VCS -cflags ${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE} ${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp tlmps.cpp
-	$(VLOGAN) -full64 +incdir+common example_uvm_dut.sv +define+UVM_OBJECT_MUST_HAVE_CONSTRUCTOR
-	$(VCS_ELAB) -e VcsMain -full64 sv_main ${VCS_HOME}/linux64/lib/vcs_tls.o -slave
-	mv simv _tlm_pbsb.so
-	mv simv.daidir _tlm_pbsb.so.daidir
-
+# Copy xspcomm library to DUT module directory
 copy_xspcomm:
-	@echo "Try copy python module: xspcomm"
-	@cp -r {{__XSPCOMM_PYTHON__}} xspcomm
-run:	
-	LD_PRELOAD=./_tlm_pbsb.so python3 example_python.py
+	@cp -r {{__XSPCOMM_PYTHON__}} $(DUT_MODULE)/xspcomm
 
-# Run DUT example (if generated with --generate-dut)
-run_dut:
+# Run DUT example
+run:
 	@if [ -f example_dut.py ]; then \
-		echo "Running DUT example..."; \
-		LD_PRELOAD=./_tlm_pbsb.so python3 example_dut.py; \
+		cd $(DUT_MODULE) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example_dut.py; \
 	else \
-		echo "example_dut.py not found. Generate with --generate-dut flag."; \
+		echo "Error: example_dut.py not found!"; \
+		exit 1; \
 	fi
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  make all          - Clean, compile, copy xspcomm, and run"
+	@echo "  make clean        - Remove all build artifacts"
+	@echo "  make comp         - Compile UVM testbench"
+	@echo "  make copy_xspcomm - Copy xspcomm library to module directory"
+	@echo "  make run          - Run the DUT example"
+	@echo "  make help         - Show this help message"
+
+.PHONY: all clean comp copy_xspcomm run help

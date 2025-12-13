@@ -5,37 +5,97 @@
 #              This demonstrates pin-level interface for UVM transaction testing
 # Version    : {{version}}
 
-import sys
-sys.path.append('../')
-from DUT{{className}} import DUT{{className}}
+# Import from the DUT module package
+from DUT{{className}}.DUT{{className}} import DUT{{className}}
+
+
+def monitor_callback(dut):
+    """
+    Example callback function that gets called after monitor updates.
+    This demonstrates how to track and respond to state changes.
+    """
+    print(f"  [Monitor Update] {dut}")
+
 
 if __name__ == "__main__":
-    print("\n" + "="*60)
-    print("DUT{{className}} Usage Example")
-    print("="*60 + "\n")
+    print("\n" + "="*70)
+    print(" DUT{{className}} Usage Example - Pin-Level Interface ".center(70))
+    print("="*70 + "\n")
     
-    # Initialize DUT (this happens after UVM is ready)
+    # Initialize DUT
+    print("Initializing DUT...")
     dut = DUT{{className}}()
     print("✓ DUT initialized successfully\n")
     
-    # Example: Send multiple transactions
-    print("Sending 10 transactions with Step()...")
-    for i in range(10):
-        # Set field values
+    # Optional: Register callback for monitor updates
+    print("Registering monitor callback...")
+    dut.SetUpdateCallback(monitor_callback)
+    print("✓ Callback registered\n")
+    
+    # Example 1: Basic pin manipulation with Step
+    print("-" * 70)
+    print("Example 1: Basic Pin Manipulation")
+    print("-" * 70)
+    print("(Note: Monitor feedback has pipeline delay, verification in Example 2)\n")
+    for i in range(5):
+        # Set field values using clean interface: dut.field.value
         {% for data in variables -%}
-        dut.{{data.name}}.xdata.value = i * {{ loop.index1 * 5 }}
+        dut.{{data.name}}.value = i * {{ loop.index1 * 10 }}
         {% endfor %}
         
-        print(f"  Transaction {i}: {%for data in variables%}{{data.name}}={dut.{{data.name}}.xdata.value}{%if not loop.is_last%}, {%endif%}{%endfor%}")
+        # Show values before Step
+        print(f"Cycle {i:2d} - Before Step: {dut}")
         
-        # Step simulation to send this transaction
-        # Each Step(1) sends the transaction and advances 1 cycle
+        # Step advances simulation and syncs with monitor
         dut.Step(1)
     
-    # Run additional cycles to let UVM process all transactions
-    print("\nRunning 100 more cycles to complete simulation...")
+
+    
+    # Example 2: Batch processing
+    print("-" * 70)
+    print("Example 2: Running Multiple Cycles")
+    print("-" * 70)
+    {% for data in variables -%}
+    dut.{{data.name}}.value = 255
+    {% endfor %}
+    
+    print(f"Setting all fields to 255...")
+    print(f"Current state: {dut}")
+    print("Running 10 cycles...")
+    dut.Step(10)
+    
+    # Assert: Verify UVM received and echoed back our 255 values
+    {% for data in variables -%}
+    assert dut.{{data.name}}.value == 255, f"{{data.name}} verification FAILED! Sent 255, UVM returned {dut.{{data.name}}.value}"
+    {% endfor %}
+    print(f"✓ PASS: UVM correctly received and confirmed all fields = 255")
+    print(f"After 10 cycles: {dut}\n")
+    
+    # Example 3: Conflict resolution demonstration
+    print("-" * 70)
+    print("Example 3: Conflict Resolution (Monitor Wins)")
+    print("-" * 70)
+    {% for data in variables -%}
+    dut.{{data.name}}.value = 100
+    {% endfor %}
+    
+    print(f"User sets values: {dut}")
+    print("Step() sends to driver, then monitor may update...")
+    dut.Step(1)
+    
+    # Assert: Verify UVM received and echoed back our value
+    {% for data in variables -%}
+    assert dut.{{data.name}}.value == 100, f"{{data.name}} verification FAILED! Sent 100, UVM returned {dut.{{data.name}}.value}"
+    {% endfor %}
+    print(f"✓ PASS: UVM correctly received and confirmed all fields = 100")
+    print(f"After monitor update: {dut}")
+    print("(Monitor data always reflects simulator's actual state)\n")
+    
+    # Cleanup
+    print("-" * 70)
+    print("Running final cycles to complete simulation...")
     dut.Step(100)
     
-    print("\n" + "="*60)
-    print("Example completed successfully!")
-    print("="*60)
+    print("\n" + "="*70)
+    print(" Example Completed Successfully! ".center(70))
+    print("="*70 + "\n")

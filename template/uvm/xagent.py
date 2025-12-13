@@ -5,8 +5,14 @@
 #              communication between UVM and Python.
 # Version    : {{version}}
 from typing import Optional, List, Callable
-import tlm_pbsb as u
-import xspcomm as xsp
+
+# Support both standalone and package imports
+try:
+    from . import tlm_pbsb as u
+    from . import xspcomm as xsp
+except ImportError:
+    import tlm_pbsb as u
+    import xspcomm as xsp
 
 class Agent:
     """
@@ -156,6 +162,15 @@ class {{className}}:
         uvm_message = u.tlm_msg()
         uvm_message.from_bytes(byte_stream)
         env.send_port.SendMsg(uvm_message)
+    
+    def __repr__(self) -> str:
+        """String representation showing field values."""
+        fields = ', '.join([
+            {%- for data in variables %}
+            f"{{data.name}}={self.{{data.name}}.value}"{%if not loop.is_last -%},{%endif -%}
+            {%- endfor %}
+        ])
+        return f"{{className}}({fields})"
 
 class {{className}}_list:
     """
