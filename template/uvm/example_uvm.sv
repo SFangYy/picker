@@ -16,8 +16,8 @@
 //==============================================================================//
 import uvm_pkg::*;
 import uvmc_pkg::*;
-`include "../../{{filepath}}"
-`include "../{{className}}_xagent.sv"
+`include "{{filepath}}"
+`include "{{pkgName}}/{{className}}_xagent.sv"
 
 interface example_interface(input clk, input rst_n);
     int data;

@@ -1,13 +1,17 @@
 PYTHON_INCLUDE:=$(firstword $(shell python3-config --includes))
 XSP_COMM_INCLUDE:="{{__XSPCOMM_INCLUDE__}}"
 
-# Path management for new structure
-# Top folder: <TransactionName>/
-# Module folder: <TransactionName>/DUT<TransactionName>/
-# Build folder: <TransactionName>/DUT<TransactionName>/csrc/
+# Path management for optimized _pkg structure
+# Project structure:
+#   <ProjectName>/               (CURDIR, project root)
+#   ├── <ProjectName>_pkg/       (PKG_DIR, Python package)
+#   │   └── build/               (BUILD_DIR, build artifacts)
+#   ├── example_dut.py           (or example_python.py)
+#   ├── example_uvm_dut.sv       (or example_uvm.sv)
+#   └── Makefile                 (this file)
 TOP_DIR := $(CURDIR)
-DUT_MODULE := DUT{{className}}
-BUILD_DIR := $(DUT_MODULE)/csrc
+PKG_DIR := {{pkgName}}
+BUILD_DIR := $(PKG_DIR)/build
 
 # Validate required environment variables
 ifndef UVMC_HOME
@@ -57,36 +61,47 @@ all: clean comp copy_xspcomm run
 
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -rf $(DUT_MODULE)/csrc $(DUT_MODULE)/work $(DUT_MODULE)/.vlogan*
-	rm -rf $(DUT_MODULE)/_tlm_pbsb.so* $(DUT_MODULE)/simv* 
-	rm -rf $(DUT_MODULE)/ucli.key $(DUT_MODULE)/vc_hdrs.h 
-	rm -rf $(DUT_MODULE)/vcs.log $(DUT_MODULE)/AN* $(DUT_MODULE)/*.log 
-	rm -rf $(DUT_MODULE)/*.log.cmp $(DUT_MODULE)/*.vpd $(DUT_MODULE)/DVE*
-	rm -rf $(DUT_MODULE)/tlm_pbsb.py
-	rm -rf __pycache__ $(DUT_MODULE)/__pycache__
+	rm -rf $(PKG_DIR)/build $(PKG_DIR)/work $(PKG_DIR)/.vlogan*
+	rm -rf $(PKG_DIR)/_tlm_pbsb.so* $(PKG_DIR)/simv* 
+	rm -rf $(PKG_DIR)/vcs.log $(PKG_DIR)/AN* $(PKG_DIR)/*.log 
+	rm -rf $(PKG_DIR)/*.log.cmp $(PKG_DIR)/*.vpd $(PKG_DIR)/DVE*
+	rm -rf __pycache__ $(PKG_DIR)/__pycache__
 	@echo "Clean complete."
 
 # Compile target (unified for both regular and DUT mode)
 comp:
 	@mkdir -p $(BUILD_DIR)
 	swig -D'MODULE_NAME="tlm_pbsb"' -python -c++ -DUSE_VCS -I${XSP_COMM_INCLUDE} \
-		-outdir $(DUT_MODULE) -o $(BUILD_DIR)/tlmps.cpp \
+		-outdir $(PKG_DIR) -o $(BUILD_DIR)/tlmps.cpp \
 		${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
-	$(SYSCAN) -Mdir=$(DUT_MODULE)/csrc \
+	$(SYSCAN) -Mdir=$(BUILD_DIR) \
 		${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp $(BUILD_DIR)/tlmps.cpp
-	$(VLOGAN) +incdir+$(DUT_MODULE) example_uvm_dut.sv -Mdir=$(DUT_MODULE)/csrc
-	$(VCS_ELAB) -o $(DUT_MODULE)/_tlm_pbsb.so -Mdir=$(DUT_MODULE)/csrc
+	@if [ -f example_uvm_dut.sv ]; then \
+		$(VLOGAN) +incdir+$(PKG_DIR) example_uvm_dut.sv -Mdir=$(BUILD_DIR); \
+	elif [ -f example_uvm.sv ]; then \
+		$(VLOGAN) +incdir+$(PKG_DIR) example_uvm.sv -Mdir=$(BUILD_DIR); \
+	else \
+		echo "Error: No example UVM file found!"; \
+		exit 1; \
+	fi
+	$(VCS_ELAB) -o $(PKG_DIR)/_tlm_pbsb.so -Mdir=$(BUILD_DIR)
+	@echo "Cleaning build artifacts..."
+	@rm -rf $(BUILD_DIR)
+	@rm -f $(PKG_DIR)/vc_hdrs.h $(PKG_DIR)/ucli.key
+	@echo "✓ Compilation complete"
 
-# Copy xspcomm library to DUT module directory
+# Copy xspcomm library to package directory
 copy_xspcomm:
-	@cp -r {{__XSPCOMM_PYTHON__}} $(DUT_MODULE)/xspcomm
+	@cp -r {{__XSPCOMM_PYTHON__}} $(PKG_DIR)/xspcomm
 
-# Run DUT example
+# Run example (auto-detect DUT mode or non-DUT mode)
 run:
 	@if [ -f example_dut.py ]; then \
-		cd $(DUT_MODULE) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example_dut.py; \
+		cd $(PKG_DIR) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example_dut.py; \
+	elif [ -f example_python.py ]; then \
+		cd $(PKG_DIR) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example_python.py; \
 	else \
-		echo "Error: example_dut.py not found!"; \
+		echo "Error: No example file found (example_dut.py or example_python.py)!"; \
 		exit 1; \
 	fi
 
@@ -96,8 +111,8 @@ help:
 	@echo "  make all          - Clean, compile, copy xspcomm, and run"
 	@echo "  make clean        - Remove all build artifacts"
 	@echo "  make comp         - Compile UVM testbench"
-	@echo "  make copy_xspcomm - Copy xspcomm library to module directory"
-	@echo "  make run          - Run the DUT example"
+	@echo "  make copy_xspcomm - Copy xspcomm library to package directory"
+	@echo "  make run          - Run the example (auto-detect DUT/non-DUT mode)"
 	@echo "  make help         - Show this help message"
 
 .PHONY: all clean comp copy_xspcomm run help

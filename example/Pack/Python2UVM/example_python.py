@@ -1,6 +1,8 @@
 import sys
-sys.path.append('../')
-from adder_trans.adder_trans_xagent import *
+import os
+# Script runs from parent dir, adder_trans_pkg is a subdirectory
+sys.path.insert(0, '.')
+from adder_trans_pkg.adder_trans_xagent import *
 
 if __name__ == "__main__":
 

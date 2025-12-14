@@ -1,7 +1,7 @@
 import uvm_pkg::*;
 import uvmc_pkg::*;
-`include "../adder_trans.sv"
-`include "../adder_trans/adder_trans_xagent.sv"
+`include "adder_trans.sv"
+`include "adder_trans_pkg/adder_trans_xagent.sv"
 
 interface example_interface(input clk, input rst_n);
     int data;
@@ -19,9 +19,9 @@ class example_driver extends adder_trans_xdriver;
         super.build_phase(phase);
     endfunction
 
-    function sequence_receive(adder_trans tr);
+    task sequence_receive(adder_trans tr);
         `uvm_info("example_driver", $sformatf("uvm receive message: \n%s",tr.sprint()), UVM_LOW)
-    endfunction
+    endtask
 endclass
 
 class example_env extends uvm_env;

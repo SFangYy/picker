@@ -7,10 +7,6 @@
 // Version    : {{version}}
 //==============================================================================//
 
-// Include the transaction definition
-// Note: The transaction file should be in the same directory
-`include "{{filepath}}"
-
 class {{className}}_xmonitor extends uvm_monitor;
     `uvm_component_utils({{className}}_xmonitor)
     
