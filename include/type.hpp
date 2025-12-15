@@ -51,6 +51,8 @@ typedef struct export_opts {
 typedef struct pack_opts {
     std::vector<std::string> files;
     std::vector<std::string> rename;
+    std::vector<std::string> filelist;
+    std::string name;
     bool example;
     bool force;
     bool generate_dut;

@@ -19,6 +19,9 @@ namespace picker { namespace codegen {
     // namespace sv
     void gen_uvm_param(picker::pack_opts &opts, uvm_transaction_define transaction, std::string filename)
     {
+        // Use custom name if provided via -n/--name, otherwise use filename
+        std::string packageBaseName = opts.name.empty() ? filename : opts.name;
+        
         // Optimized directory structure:
         // Without -e (场景 A/B): <TransactionName>_pkg/ in current directory
         // With -e (场景 C/D): <TransactionName>/ (project root) -> <TransactionName>_pkg/ (package)
@@ -29,8 +32,8 @@ namespace picker { namespace codegen {
         
         if (opts.example) {
             // 场景 C/D: -e mode, create project root and package
-            topFolder = filename;                    // e.g., "adder_trans/"
-            pkgFolder = topFolder + "/" + filename + "_pkg";  // e.g., "adder_trans/adder_trans_pkg/"
+            topFolder = packageBaseName;                    // e.g., "adder_trans/" or "ALU/"
+            pkgFolder = topFolder + "/" + packageBaseName + "_pkg";  // e.g., "adder_trans/adder_trans_pkg/" or "ALU/ALU_pkg/"
             buildFolder = pkgFolder + "/build";      // e.g., "adder_trans/adder_trans_pkg/build/"
             
             // Check if top folder exists
@@ -45,7 +48,7 @@ namespace picker { namespace codegen {
             }
         } else {
             // 场景 A/B: no -e, create package directly in current directory
-            pkgFolder = filename + "_pkg";           // e.g., "adder_trans_pkg/"
+            pkgFolder = packageBaseName + "_pkg";           // e.g., "adder_trans_pkg/" or "ALU_pkg/"
             buildFolder = pkgFolder + "/build";      // e.g., "adder_trans_pkg/build/"
             
             // Check if package folder exists
@@ -70,12 +73,13 @@ namespace picker { namespace codegen {
         data["__XSPCOMM_INCLUDE__"] = xspcomm_include_location;
         data["variables"]           = inja::json::array();
         data["transactions"]        = inja::json::array();  // Empty for single-transaction mode
+        data["transaction_count"]   = 0;  // Single transaction mode
         data["useType"]             = 1;
         data["filepath"]            = transaction.filepath;
         data["version"]             = transaction.version;
         data["datenow"]             = transaction.data_now;
         data["className"]           = transaction.name;
-        data["pkgName"]             = filename + "_pkg";  // Package name for templates
+        data["pkgName"]             = packageBaseName + "_pkg";  // Package name for templates
         int byte_stream_count       = 0;
         for (int i = 0; i < transaction.parameters.size(); i++) {
             inja::json parameter;
@@ -93,30 +97,30 @@ namespace picker { namespace codegen {
         std::string template_path = picker::get_template_path();
         
         // Generate core package files in <name>_pkg/
-        gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + filename + "_xagent.py");
-        gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + filename + "_xagent.sv");
+        gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + packageBaseName + "_xagent.py");
+        gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + packageBaseName + "_xagent.sv");
         gen_uvm_code(data, template_path + "/uvm/__init__.py", pkgFolder + "/__init__.py");
         
         // Generate DUT class if requested
         if (opts.generate_dut) {
-            gen_uvm_code(data, template_path + "/uvm/xdut.py", pkgFolder + "/" + filename + ".py");
+            gen_uvm_code(data, template_path + "/uvm/xdut.py", pkgFolder + "/" + packageBaseName + ".py");
         }
         
         // Generate example files in project root (only when -e is used)
         if (opts.example) {
             if (opts.generate_dut) {
                 // 场景 D: DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example_dut.py", topFolder + "/example_dut.py");
-                gen_uvm_code(data, template_path + "/uvm/example_uvm_dut.sv", topFolder + "/example_uvm_dut.sv");
+                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
+                gen_uvm_code(data, template_path + "/uvm/example_dut.sv", topFolder + "/example.sv");
             } else {
                 // 场景 C: Non-DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example_python.py", topFolder + "/example_python.py");
-                gen_uvm_code(data, template_path + "/uvm/example_uvm.sv", topFolder + "/example_uvm.sv");
+                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
+                gen_uvm_code(data, template_path + "/uvm/example.sv", topFolder + "/example.sv");
             }
             gen_uvm_code(data, template_path + "/uvm/Makefile", topFolder + "/Makefile");
         }
         
-        std::cout << "generate " + filename + " code successfully." << std::endl;
+        std::cout << "generate " + packageBaseName + " code successfully." << std::endl;
     }
 
     // Multi-transaction unified agent generation
@@ -220,40 +224,8 @@ namespace picker { namespace codegen {
         
         std::string template_path = picker::get_template_path();
         
-        // Generate individual agent files for each transaction type in package
-        for (size_t i = 0; i < transactions.size(); i++) {
-            // Create single-transaction data for this specific transaction
-            inja::json single_data;
-            single_data["__XSPCOMM_PYTHON__"] = data["__XSPCOMM_PYTHON__"];
-            single_data["__XSPCOMM_INCLUDE__"] = data["__XSPCOMM_INCLUDE__"];
-            single_data["version"] = transactions[i].version;
-            single_data["datenow"] = transactions[i].data_now;
-            single_data["className"] = transactions[i].name;
-            single_data["pkgName"] = dut_name + "_pkg";
-            single_data["filepath"] = transactions[i].filepath;
-            single_data["useType"] = 1;
-            single_data["transactions"] = inja::json::array();  // Empty for per-transaction SV file
-            single_data["variables"] = inja::json::array();
-            
-            int trans_byte_count = 0;
-            for (const auto &param : transactions[i].parameters) {
-                inja::json parameter;
-                parameter["nums"] = param.byte_count;
-                parameter["bit_count"] = param.bit_count;
-                parameter["macro"] = param.is_marcro;
-                parameter["name"] = param.name;
-                parameter["macro_name"] = param.macro_name;
-                parameter["start_index"] = "0";
-                parameter["end_index"] = "0";
-                single_data["variables"].push_back(parameter);
-                trans_byte_count += param.byte_count;
-            }
-            single_data["byte_stream_count"] = trans_byte_count;
-            
-            // Generate SV agent for this transaction in package
-            gen_uvm_code(single_data, template_path + "/uvm/xagent.sv", 
-                        pkgFolder + "/" + transactions[i].name + "_xagent.sv");
-        }
+        // Generate unified SV agent with all transactions in package
+        gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + dut_name + "_xagent.sv");
         
         // Generate unified Python agent with all transactions in package
         gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + dut_name + "_xagent.py");
@@ -268,12 +240,12 @@ namespace picker { namespace codegen {
         if (opts.example) {
             if (opts.generate_dut) {
                 // DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example_dut.py", topFolder + "/example_dut.py");
-                gen_uvm_code(data, template_path + "/uvm/example_uvm_dut.sv", topFolder + "/example_uvm_dut.sv");
+                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
+                gen_uvm_code(data, template_path + "/uvm/example_dut.sv", topFolder + "/example.sv");
             } else {
                 // Non-DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example_python.py", topFolder + "/example_python.py");
-                gen_uvm_code(data, template_path + "/uvm/example_uvm.sv", topFolder + "/example_uvm.sv");
+                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
+                gen_uvm_code(data, template_path + "/uvm/example.sv", topFolder + "/example.sv");
             }
             gen_uvm_code(data, template_path + "/uvm/Makefile", topFolder + "/Makefile");
         }

@@ -128,8 +128,18 @@ namespace picker { namespace parser {
             int numsOrigin, nums = 1, macro = 0;
             uvm_parameter parameter;
 
-            if (module_token[j]["tag"] == "rand") {
-                data_type            = module_token[++j]["tag"];
+            // Support both 'rand' and direct type declarations
+            bool has_rand = (module_token[j]["tag"] == "rand");
+            if (has_rand || module_token[j]["tag"] == "bit" || module_token[j]["tag"] == "logic" ||
+                module_token[j]["tag"] == "byte" || module_token[j]["tag"] == "int" ||
+                module_token[j]["tag"] == "shortint" || module_token[j]["tag"] == "longint") {
+                
+                if (has_rand) {
+                    data_type = module_token[++j]["tag"];
+                } else {
+                    data_type = module_token[j]["tag"];
+                }
+                
                 parameter.byte_count = 1;
                 parameter.bit_count  = 1;
 

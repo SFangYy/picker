@@ -164,9 +164,13 @@ int set_options_pack_message(CLI::App &top_app)
     
     app->add_flag("-d,--generate-dut", pack_opts.generate_dut, "Generate DUT abstraction class with pin-level interface (using xspcomm)");
 
-    app->add_option("file", pack_opts.files, "Sv source file, contain the transaction define")->required();
+    app->add_option("file", pack_opts.files, "Sv source file, contain the transaction define");
 
     app->add_option("-r,--rename", pack_opts.rename, "Rename transaction name in picker generate code");
+    
+    app->add_option("-f,--filelist", pack_opts.filelist, "File list containing transaction files");
+    
+    app->add_option("-n,--name", pack_opts.name, "Name for the generated package (default: auto-generated from files)");
 
     return 0;
 }
@@ -392,23 +396,71 @@ int main(int argc, char **argv)
         }
         // subcommand pack
     } else if (app.get_subcommand_ptr("pack")->parsed()) {
-        // todo
+        // Process filelist if provided
+        if (!pack_opts.filelist.empty()) {
+            for (const auto &listfile : pack_opts.filelist) {
+                std::ifstream ifs(listfile);
+                if (!ifs.is_open()) {
+                    PK_FATAL("Cannot open filelist: %s", listfile.c_str());
+                }
+                std::string line;
+                while (std::getline(ifs, line)) {
+                    line = picker::trim(line);
+                    // Skip empty lines and comments
+                    if (line.empty() || line[0] == '#') continue;
+                    // Remove inline comments
+                    auto pos = line.find('#');
+                    if (pos != std::string::npos) {
+                        line = picker::trim(line.substr(0, pos));
+                    }
+                    if (!line.empty() && (line.ends_with(".sv") || line.ends_with(".v"))) {
+                        pack_opts.files.push_back(line);
+                    }
+                }
+            }
+        }
+        
+        // Validate that we have files to process
+        if (pack_opts.files.empty()) {
+            PK_FATAL("No transaction files specified. Use 'file' argument or -f/--filelist option.");
+        }
+        
         picker::uvm_transaction_define uvm_transaction;
         std::string filepath, filename, macro_define;
-        // std::queue<std::string> rnames = pack_opts.rname;
-        int i = 0;
-        if (pack_opts.files.size() != 0) {
+        
+        // Check if multi-transaction mode (multiple files or DUT name specified)
+        if (pack_opts.files.size() > 1 || !pack_opts.name.empty()) {
+            // Multi-transaction mode
+            std::vector<picker::uvm_transaction_define> transactions;
+            std::vector<std::string> filenames;
+            
+            int i = 0;
             for (auto &path : pack_opts.files) {
                 picker::parser::uvm(pack_opts, path, filename, uvm_transaction);
                 if (i < pack_opts.rename.size()) {
                     filename             = pack_opts.rename[i];
                     uvm_transaction.name = pack_opts.rename[i];
-                    i++;
+                }
+                transactions.push_back(uvm_transaction);
+                filenames.push_back(filename);
+                i++;
+            }
+            
+            // Use provided DUT name or derive from filenames
+            std::string dut_name = pack_opts.name.empty() ? filenames[0] : pack_opts.name;
+            picker::codegen::gen_uvm_multi_param(pack_opts, transactions, filenames, dut_name);
+        } else {
+            // Single-transaction mode
+            for (auto &path : pack_opts.files) {
+                picker::parser::uvm(pack_opts, path, filename, uvm_transaction);
+                if (!pack_opts.rename.empty()) {
+                    filename             = pack_opts.rename[0];
+                    uvm_transaction.name = pack_opts.rename[0];
                 }
                 picker::codegen::gen_uvm_param(pack_opts, uvm_transaction, filename);
             }
-            exit(0);
         }
+        exit(0);
     }
 
     nlohmann::json sync_opts;
