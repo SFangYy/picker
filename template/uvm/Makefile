@@ -6,8 +6,8 @@ XSP_COMM_INCLUDE:="{{__XSPCOMM_INCLUDE__}}"
 #   <ProjectName>/               (CURDIR, project root)
 #   ├── <ProjectName>_pkg/       (PKG_DIR, Python package)
 #   │   └── build/               (BUILD_DIR, build artifacts)
-#   ├── example_dut.py           (or example_python.py)
-#   ├── example_uvm_dut.sv       (or example_uvm.sv)
+#   ├── example.py               (Python example)
+#   ├── example.sv               (SystemVerilog example)
 #   └── Makefile                 (this file)
 TOP_DIR := $(CURDIR)
 PKG_DIR := {{pkgName}}
@@ -76,10 +76,8 @@ comp:
 		${XSP_COMM_INCLUDE}/xspcomm/python_tlm_pbsb.i
 	$(SYSCAN) -Mdir=$(BUILD_DIR) \
 		${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp $(BUILD_DIR)/tlmps.cpp
-	@if [ -f example_uvm_dut.sv ]; then \
-		$(VLOGAN) +incdir+$(PKG_DIR) example_uvm_dut.sv -Mdir=$(BUILD_DIR); \
-	elif [ -f example_uvm.sv ]; then \
-		$(VLOGAN) +incdir+$(PKG_DIR) example_uvm.sv -Mdir=$(BUILD_DIR); \
+	@if [ -f example.sv ]; then \
+		$(VLOGAN) +incdir+$(PKG_DIR) example.sv -Mdir=$(BUILD_DIR); \
 	else \
 		echo "Error: No example UVM file found!"; \
 		exit 1; \
@@ -96,12 +94,10 @@ copy_xspcomm:
 
 # Run example (auto-detect DUT mode or non-DUT mode)
 run:
-	@if [ -f example_dut.py ]; then \
-		cd $(PKG_DIR) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example_dut.py; \
-	elif [ -f example_python.py ]; then \
-		cd $(PKG_DIR) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example_python.py; \
+	@if [ -f example.py ]; then \
+		cd $(PKG_DIR) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example.py; \
 	else \
-		echo "Error: No example file found (example_dut.py or example_python.py)!"; \
+		echo "Error: No example file found (example.py)!"; \
 		exit 1; \
 	fi
 
