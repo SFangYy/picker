@@ -7,34 +7,214 @@
 """
 {{pkgName}} Python Package
 
-This package provides UVM transaction-based communication{% if length(transactions) > 0 %} for multi-transaction testing{% endif %}.
-
-Components:
-    - {{className}}_xagent: UVM Agent and transaction classes
-{% if length(transactions) > 0 -%}
-    - {{className}}: Unified DUT abstraction with pin-level interface
-{% else -%}
-    - {{className}}: DUT abstraction with pin-level interface
-{% endif -%}
+UVM transaction-based communication package.
 """
 
 __version__ = "{{version}}"
-__all__ = ["{{className}}_xagent", "{{className}}"]
 
-# Import main components for easier access
+{% if generate_dut -%}
+# ============================================================================
+# DUT Mode: Integrated __init__.py with DUT implementation
+# ============================================================================
+
+from typing import Optional, Callable, Dict, Type, List
+import struct
+
 try:
-{% if length(transactions) > 0 -%}
-    # Multi-transaction mode
-    from .{{className}}_xagent import UnifiedAgent
-    from .{{className}} import DUT{{className}}
+    from . import tlm_pbsb as u
+    from . import xspcomm as xsp
+except ImportError:
+    import tlm_pbsb as u
+    import xspcomm as xsp
+
+
+# ==================== Agent and Transaction Classes ====================
+# Import from xagent module
+from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
+
+
+# ==================== DUT Implementation ====================
+
+class _PinWrapper:
+    """Wrapper to provide dut.pin.value access instead of dut.pin.xdata.value"""
+    def __init__(self, xpin: xsp.XPin):
+        self._xpin = xpin
+
+    @property
+    def value(self):
+        return self._xpin.xdata.value
+
+    @value.setter
+    def value(self, val):
+        self._xpin.xdata.value = val
+
+    @property
+    def xpin(self):
+        return self._xpin
+
+    @property
+    def xdata(self):
+        return self._xpin.xdata
+
+
+class DUT{{className}}:
+    """
+    DUT abstraction for {{className}} with pin-level interface.
+
+    Pins:
+    {% for data in variables -%}
+    - {{data.name}}: {{data.bit_count}}-bit signal
+    {% endfor -%}
+
+    Example:
+        >>> dut = DUT{{className}}()
+        {%- for data in variables %}
+        {%- if loop.index == 1 %}
+        >>> dut.{{data.name}}.value = 10
+        {%- endif %}
+        {%- endfor %}
+        >>> dut.Step(1)
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize DUT with Agent and xspcomm infrastructure."""
+        self._event = xsp.Event()
+        self._xports: Dict[str, xsp.XPort] = {}
+        self._user_callback: Optional[Callable[['DUT{{className}}'], None]] = None
+        self._xpins = {}
+        self._callback_pending = False
+
+        # Initialize XPins and XPorts per transaction
+        {% for trans in transactions -%}
+        # Transaction: {{trans.name}}
+        self._xports['{{trans.name}}'] = xsp.XPort()
+        {% for data in trans.variables -%}
+        self._xpins['{{data.name}}'] = xsp.XPin(xsp.XData({{data.bit_count}}), self._event)
+        self._xpins['{{data.name}}'].xdata.AsImmWrite()
+        self._xports['{{trans.name}}'].Add("{{data.name}}", self._xpins['{{data.name}}'].xdata)
+        {% endfor -%}
+
+        {% endfor -%}
+        # Create pin accessors
+        {% for data in variables -%}
+        self.{{data.name}} = _PinWrapper(self._xpins['{{data.name}}'])
+        {% endfor -%}
+
+        # Monitor callback
+        def _monitor_callback(trans_type: str, trans_obj):
+            """Internal callback for monitor updates."""
+            try:
+                # Update pins from received transaction
+                {% for trans in transactions -%}
+                if trans_type == '{{trans.name}}':
+                    {% for data in trans.variables -%}
+                    self._xpins['{{data.name}}'].xdata.value = trans_obj.{{data.name}}.value
+                    {% endfor -%}
+                {% endfor -%}
+                self._callback_pending = True
+            except Exception as e:
+                print(f"Monitor callback error: {e}")
+
+        # Initialize unified Agent (disable auto_register, we'll register manually)
+        self.agent = Agent(monitor_callback=_monitor_callback, auto_register=False)
+
+        # Register all transaction types
+        {% for trans in transactions -%}
+        send_port = kwargs.get('send_port_{{trans.name}}', '{{trans.name}}')
+        receive_port = kwargs.get('receive_port_{{trans.name}}', '{{trans.name}}')
+        self.agent.register_transaction({{trans.name}}, send_port=send_port, receive_port=receive_port)
+        {% endfor %}
+
+    def Step(self, cycles: int = 1):
+        """
+        Advance simulation by specified cycles.
+        1. Send current pin values as transactions
+        2. Run simulation
+        3. Update pins from monitor
+        """
+        # Create and drive transactions
+        {% for trans in transactions -%}
+        tr = {{trans.name}}()
+        {% for data in trans.variables -%}
+        tr.{{data.name}}.value = self._xpins['{{data.name}}'].xdata.value
+        {% endfor -%}
+        self.agent.drive(tr)
+        {% endfor -%}
+
+        self._callback_pending = False
+
+        # Run with extra cycles for monitor feedback
+        total_cycles = cycles + 2
+        self.agent.run(total_cycles)
+
+        # Wait for monitor callback
+        wait_count = 0
+        while not self._callback_pending and wait_count < 10:
+            self.agent.run(1)
+            wait_count += 1
+
+        # Trigger user callback
+        if self._callback_pending and self._user_callback:
+            self._user_callback(self)
+            self._callback_pending = False
+
+    def SetUpdateCallback(self, callback: Optional[Callable[['DUT{{className}}'], None]]):
+        """Register callback after monitor updates."""
+        self._user_callback = callback
+
+    def SetZero(self):
+        """Set all pins to zero."""
+        {% for data in variables -%}
+        self._xpins['{{data.name}}'].xdata.value = 0
+        {% endfor %}
+
+    def GetAgent(self):
+        """Get underlying Agent object."""
+        return self.agent
+
+    def __repr__(self):
+        fields = []
+        {% for data in variables -%}
+        fields.append(f"{{data.name}}={self._xpins['{{data.name}}'].xdata.value}")
+        {% endfor -%}
+        return f"DUT{{className}}({', '.join(fields)})"
+
+
+# Public API for DUT mode
+__all__ = [
+    "Agent",
+    "BaseTransaction",
+    "DUT{{className}}",
+    {% for trans in transactions -%}
+    "{{trans.name}}",
+    {% endfor -%}
+    "u",
+    "xsp",
+]
+
 {% else -%}
-    # Single transaction mode
-    from .{{className}}_xagent import Agent, {{className}}
-    from .{{className}} import DUT{{className}}
-{% endif -%}
+# ============================================================================
+# Agent Mode: Standard modular imports
+# ============================================================================
+
+try:
+    from . import tlm_pbsb as u
+    from . import xspcomm as xsp
+    from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
 except ImportError as e:
-    # Handle import errors gracefully during package installation
     import warnings
-    warnings.warn(f"Could not import all components: {e}")
+    warnings.warn(f"Could not import components: {e}")
+    raise
 
+# Public API for Agent mode
+__all__ = [
+    "Agent",
+    "BaseTransaction",
+    {% for trans in transactions -%}
+    "{{trans.name}}",
+    {% endfor -%}
+    "u",
+    "xsp",
+]
 
+{% endif -%}

@@ -6,7 +6,7 @@
 // Version    : 1.0
 //==============================================================================
 
-package picker_uvm_utils_pkg;
+package utils_pkg;
 
     // Maximum field width supported for serialization
     parameter int MAX_FIELD_WIDTH = 2048;
@@ -91,4 +91,4 @@ package picker_uvm_utils_pkg;
         return result;
     endfunction
 
-endpackage : picker_uvm_utils_pkg
+endpackage : utils_pkg

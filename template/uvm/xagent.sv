@@ -7,7 +7,7 @@
 //==============================================================================//
 
 // Import common utility package for serialization functions
-import picker_uvm_utils_pkg::*;
+import utils_pkg::*;
 
 {% if transaction_count > 0 -%}
 {% for trans in transactions -%}

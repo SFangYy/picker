@@ -9,13 +9,13 @@ import uvm_pkg::*;
 import uvmc_pkg::*;
 
 // Include common utility package before agents
-`include "ALU_pkg/picker_uvm_utils_pkg.sv"
+`include "ALU_pkg/utils_pkg.sv"
 
 // Include source files and generated agent files
 // Source files are in pack_output/, agent file is in ALU_pkg/
 `include "alu_op.sv"
 `include "alu_result.sv"
-`include "ALU_pkg/ALU_xagent.sv"
+`include "ALU_pkg/xagent.sv"
 
 // ALU functional model
 class alu_model extends uvm_component;

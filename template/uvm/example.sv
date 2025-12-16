@@ -12,18 +12,18 @@ import uvm_pkg::*;
 import uvmc_pkg::*;
 
 // Include common utility package before agents
-`include "{{pkgName}}/picker_uvm_utils_pkg.sv"
+`include "{{pkgName}}/utils_pkg.sv"
 
 {% if length(transactions) > 0 -%}
 // Multi-transaction mode: include all transaction definitions and agents
 {% for trans in transactions -%}
 `include "{{trans.filepath}}"
-`include "{{pkgName}}/{{trans.name}}_xagent.sv"
+`include "{{pkgName}}/xagent.sv"
 {% endfor -%}
 {% else -%}
 // Single transaction mode: include transaction definition and agent
 `include "{{filepath}}"
-`include "{{pkgName}}/{{className}}_xagent.sv"
+`include "{{pkgName}}/xagent.sv"
 {% endif -%}
 
 interface example_interface(input clk, input rst_n);
@@ -229,12 +229,6 @@ class example_env extends uvm_env;
         end
         {% endfor -%}
 
-        // Special connection for ALU: alu_op driver needs access to alu_result monitor
-        if (alu_op_agent.alu_op_xdrv != null && alu_result_agent.alu_result_xmon != null) begin
-            if ($cast(alu_op_drv, alu_op_agent.alu_op_xdrv)) begin
-                alu_op_drv.result_mon_handle = alu_result_agent.alu_result_xmon;
-            end
-        end
         {% else -%}
         // Connect driver to monitor for echo back (single transaction)
         if (xagent.{{className}}_xdrv != null && xagent.{{className}}_xmon != null) begin

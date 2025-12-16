@@ -12,11 +12,11 @@ import uvm_pkg::*;
 import uvmc_pkg::*;
 
 // Include common utility package before agents
-`include "adder_trans_pkg/picker_uvm_utils_pkg.sv"
+`include "adder_trans_pkg/utils_pkg.sv"
 
 // Single transaction mode: include transaction definition and agent
 `include "adder_trans.sv"
-`include "adder_trans_pkg/adder_trans_xagent.sv"
+`include "adder_trans_pkg/xagent.sv"
 interface example_interface(input clk, input rst_n);
     // Add your DUT interface signals here if needed
     // For this example, we just verify that transactions are received

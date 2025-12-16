@@ -10,12 +10,12 @@ import uvm_pkg::*;
 import uvmc_pkg::*;
 
 // Include common utility package before agents
-`include "adder_trans_pkg/picker_uvm_utils_pkg.sv"
+`include "adder_trans/utils_pkg.sv"
 
 // Include transaction and generated agent
 `include "adder_trans.sv"
-`include "Adder.v"
-`include "adder_trans_pkg/adder_trans_xagent.sv"
+`include "../../example/Adder/Adder.v"
+`include "adder_trans/xagent.sv"
 
 // Interface for Adder signals  
 interface adder_if;

@@ -4,7 +4,6 @@ namespace picker { namespace codegen {
 
     void gen_uvm_code(inja::json data, std::string templateName, std::string outputName)
     {
-        // std::cout << className << std::endl;
         std::ifstream template_file(templateName);
         std::string template_str((std::istreambuf_iterator<char>(template_file)), std::istreambuf_iterator<char>());
         template_file.close();
@@ -16,216 +15,110 @@ namespace picker { namespace codegen {
         output_file.close();
     }
 
-    // namespace sv
-    void gen_uvm_param(picker::pack_opts &opts, uvm_transaction_define transaction, std::string filename)
-    {
-        // Use custom name if provided via -n/--name, otherwise use filename
-        std::string packageBaseName = opts.name.empty() ? filename : opts.name;
-        
-        // Optimized directory structure:
-        // Without -e (场景 A/B): <TransactionName>_pkg/ in current directory
-        // With -e (场景 C/D): <TransactionName>/ (project root) -> <TransactionName>_pkg/ (package)
-        
-        std::string topFolder;      // Project root (only for -e mode)
-        std::string pkgFolder;      // Package folder: <name>_pkg
-        std::string buildFolder;    // Build artifacts folder
-        
+    // ============ Helper Functions ============
+
+    // 设置目录结构并返回pkg和top路径
+    std::pair<std::string, std::string> setup_directories(const pack_opts& opts, const std::string& packageName) {
+        std::string topFolder, pkgFolder, buildFolder;
+
         if (opts.example) {
-            // 场景 C/D: -e mode, create project root and package
-            topFolder = packageBaseName;                    // e.g., "adder_trans/" or "ALU/"
-            pkgFolder = topFolder + "/" + packageBaseName + "_pkg";  // e.g., "adder_trans/adder_trans_pkg/" or "ALU/ALU_pkg/"
-            buildFolder = pkgFolder + "/build";      // e.g., "adder_trans/adder_trans_pkg/build/"
-            
-            // Check if top folder exists
+            topFolder = "uvmpy";
+            pkgFolder = topFolder + "/" + packageName;
+            buildFolder = pkgFolder + "/build";
+
             if (std::filesystem::exists(topFolder) && !opts.force) {
-                PK_MESSAGE("folder already exists");
+                PK_MESSAGE("folder already exists, use -c/--force to overwrite");
                 exit(0);
-            } else {
-                if (std::filesystem::exists(topFolder)) {
-                    std::filesystem::remove_all(topFolder);
-                }
-                std::filesystem::create_directories(buildFolder);
             }
+            if (std::filesystem::exists(topFolder)) {
+                std::filesystem::remove_all(topFolder);
+            }
+            std::filesystem::create_directories(buildFolder);
         } else {
-            // 场景 A/B: no -e, create package directly in current directory
-            pkgFolder = packageBaseName + "_pkg";           // e.g., "adder_trans_pkg/" or "ALU_pkg/"
-            buildFolder = pkgFolder + "/build";      // e.g., "adder_trans_pkg/build/"
-            
-            // Check if package folder exists
+            pkgFolder = packageName;
+            buildFolder = pkgFolder + "/build";
+
             if (std::filesystem::exists(pkgFolder) && !opts.force) {
-                PK_MESSAGE("folder already exists");
+                PK_MESSAGE("folder already exists, use -c/--force to overwrite");
                 exit(0);
-            } else {
-                if (std::filesystem::exists(pkgFolder)) {
-                    std::filesystem::remove_all(pkgFolder);
-                }
-                std::filesystem::create_directories(buildFolder);
             }
-        }
-
-        inja::json data;
-        std::string erro_message;
-        auto python_location = picker::get_xcomm_lib("python/xspcomm", erro_message);
-        if (python_location.empty()) { PK_FATAL("%s\n", erro_message.c_str()); }
-        data["__XSPCOMM_PYTHON__"]    = python_location;
-        auto xspcomm_include_location = picker::get_xcomm_lib("include", erro_message);
-        if (python_location.empty()) { PK_FATAL("%s\n", erro_message.c_str()); }
-        data["__XSPCOMM_INCLUDE__"] = xspcomm_include_location;
-        data["variables"]           = inja::json::array();
-        data["transactions"]        = inja::json::array();  // Empty for single-transaction mode
-        data["transaction_count"]   = 0;  // Single transaction mode
-        data["useType"]             = 1;
-        data["filepath"]            = transaction.filepath;
-        data["version"]             = transaction.version;
-        data["datenow"]             = transaction.data_now;
-        data["className"]           = transaction.name;
-        data["pkgName"]             = packageBaseName + "_pkg";  // Package name for templates
-        int byte_stream_count       = 0;
-        for (int i = 0; i < transaction.parameters.size(); i++) {
-            inja::json parameter;
-            parameter["nums"]        = transaction.parameters[i].byte_count;
-            parameter["bit_count"]   = transaction.parameters[i].bit_count;
-            parameter["macro"]       = transaction.parameters[i].is_marcro;
-            parameter["name"]        = transaction.parameters[i].name;
-            parameter["macro_name"]  = transaction.parameters[i].macro_name;
-            // Removed redundant start_index/end_index fields
-            data["variables"].push_back(parameter);
-            byte_stream_count += transaction.parameters[i].byte_count;
-        }
-        data["byte_stream_count"] = byte_stream_count;
-
-        // Enhance: Pre-compute struct format characters and byte offsets for Python serialization
-        int byte_offset = 0;
-        for (auto& param : data["variables"]) {
-            int byte_count = param["nums"];
-            param["byte_offset"] = byte_offset;
-
-            // Assign struct format character based on byte alignment
-            switch(byte_count) {
-                case 1:
-                    param["struct_fmt"] = "B";  // unsigned char
-                    param["is_standard_aligned"] = true;
-                    break;
-                case 2:
-                    param["struct_fmt"] = "H";  // unsigned short
-                    param["is_standard_aligned"] = true;
-                    break;
-                case 4:
-                    param["struct_fmt"] = "I";  // unsigned int
-                    param["is_standard_aligned"] = true;
-                    break;
-                case 8:
-                    param["struct_fmt"] = "Q";  // unsigned long long
-                    param["is_standard_aligned"] = true;
-                    break;
-                default:
-                    param["struct_fmt"] = "";   // Non-standard alignment, needs special handling
-                    param["is_standard_aligned"] = false;
-                    break;
+            if (std::filesystem::exists(pkgFolder)) {
+                std::filesystem::remove_all(pkgFolder);
             }
-
-            byte_offset += byte_count;
+            std::filesystem::create_directories(buildFolder);
         }
 
-        std::string template_path = picker::get_template_path();
-
-        // Generate core package files in <name>_pkg/
-        gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + packageBaseName + "_xagent.py");
-        gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + packageBaseName + "_xagent.sv");
-        gen_uvm_code(data, template_path + "/uvm/__init__.py", pkgFolder + "/__init__.py");
-
-        // Generate common utility package
-        gen_uvm_code(data, template_path + "/uvm/picker_uvm_utils_pkg.sv", pkgFolder + "/picker_uvm_utils_pkg.sv");
-        
-        // Generate DUT class if requested
-        if (opts.generate_dut) {
-            gen_uvm_code(data, template_path + "/uvm/xdut.py", pkgFolder + "/" + packageBaseName + ".py");
-        }
-        
-        // Generate example files in project root (only when -e is used)
-        if (opts.example) {
-            if (opts.generate_dut) {
-                // 场景 D: DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
-                gen_uvm_code(data, template_path + "/uvm/example_dut.sv", topFolder + "/example.sv");
-            } else {
-                // 场景 C: Non-DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
-                gen_uvm_code(data, template_path + "/uvm/example.sv", topFolder + "/example.sv");
-            }
-            gen_uvm_code(data, template_path + "/uvm/Makefile", topFolder + "/Makefile");
-        }
-        
-        std::cout << "generate " + packageBaseName + " code successfully." << std::endl;
+        return {pkgFolder, topFolder};
     }
 
-    // Multi-transaction unified agent generation
-    void gen_uvm_multi_param(picker::pack_opts &opts, const std::vector<uvm_transaction_define> &transactions, 
-                            const std::vector<std::string> &filenames, const std::string &dut_name)
-    {
-        // Optimized directory structure for multi-transaction:
-        // Without -e: <DUTName>_pkg/ in current directory
-        // With -e: <DUTName>/ (project root) -> <DUTName>_pkg/ (package)
-        
-        std::string topFolder;      // Project root (only for -e mode)
-        std::string pkgFolder;      // Package folder: <name>_pkg
-        std::string buildFolder;    // Build artifacts folder
-        
-        if (opts.example) {
-            // With -e: create project root and package
-            topFolder = dut_name;                        // e.g., "ALU/"
-            pkgFolder = topFolder + "/" + dut_name + "_pkg";  // e.g., "ALU/ALU_pkg/"
-            buildFolder = pkgFolder + "/build";          // e.g., "ALU/ALU_pkg/build/"
-            
-            // Check if top folder exists
-            if (std::filesystem::exists(topFolder) && !opts.force) {
-                PK_MESSAGE("folder already exists, use -c/--force to overwrite");
-                exit(0);
-            } else {
-                if (std::filesystem::exists(topFolder)) {
-                    std::filesystem::remove_all(topFolder);
-                }
-                std::filesystem::create_directories(buildFolder);
-            }
-        } else {
-            // Without -e: create package directly in current directory
-            pkgFolder = dut_name + "_pkg";               // e.g., "ALU_pkg/"
-            buildFolder = pkgFolder + "/build";          // e.g., "ALU_pkg/build/"
-            
-            // Check if package folder exists
-            if (std::filesystem::exists(pkgFolder) && !opts.force) {
-                PK_MESSAGE("folder already exists, use -c/--force to overwrite");
-                exit(0);
-            } else {
-                if (std::filesystem::exists(pkgFolder)) {
-                    std::filesystem::remove_all(pkgFolder);
-                }
-                std::filesystem::create_directories(buildFolder);
-            }
+    // 计算单个字段的元数据（byte_offset, struct_fmt, is_standard_aligned）
+    void compute_field_metadata(inja::json& param, int& byte_offset) {
+        int byte_count = param["nums"];
+        param["byte_offset"] = byte_offset;
+
+        switch(byte_count) {
+            case 1:
+                param["struct_fmt"] = "B";
+                param["is_standard_aligned"] = true;
+                break;
+            case 2:
+                param["struct_fmt"] = "H";
+                param["is_standard_aligned"] = true;
+                break;
+            case 4:
+                param["struct_fmt"] = "I";
+                param["is_standard_aligned"] = true;
+                break;
+            case 8:
+                param["struct_fmt"] = "Q";
+                param["is_standard_aligned"] = true;
+                break;
+            default:
+                param["struct_fmt"] = "";
+                param["is_standard_aligned"] = false;
+                break;
         }
 
-        // Prepare data for template rendering
+        byte_offset += byte_count;
+    }
+
+    // ============ Unified Generation Function ============
+
+    // 统一的UVM代码生成函数（支持单事务和多事务）
+    void gen_uvm_unified(picker::pack_opts &opts,
+                        const std::vector<uvm_transaction_define> &transactions,
+                        const std::vector<std::string> &filenames,
+                        const std::string &package_name) {
+
+        // 1. 设置目录结构
+        auto [pkgFolder, topFolder] = setup_directories(opts, package_name);
+
+        // 2. 准备模板数据
         inja::json data;
         std::string erro_message;
+
+        // 设置xspcomm路径
         auto python_location = picker::get_xcomm_lib("python/xspcomm", erro_message);
         if (python_location.empty()) { PK_FATAL("%s\n", erro_message.c_str()); }
         data["__XSPCOMM_PYTHON__"] = python_location;
-        
+
         auto xspcomm_include_location = picker::get_xcomm_lib("include", erro_message);
         if (xspcomm_include_location.empty()) { PK_FATAL("%s\n", erro_message.c_str()); }
         data["__XSPCOMM_INCLUDE__"] = xspcomm_include_location;
-        
-        data["className"] = dut_name;
-        data["pkgName"] = dut_name + "_pkg";  // Package name for templates
+
+        data["className"] = package_name;
+        data["pkgName"] = package_name;
         data["version"] = transactions[0].version;
         data["datenow"] = transactions[0].data_now;
         data["useType"] = 1;
-        
-        // Collect all transactions and their variables
+        data["generate_dut"] = opts.generate_dut;  // Add DUT mode flag
         data["transactions"] = inja::json::array();
-        data["variables"] = inja::json::array();  // All variables flattened
+        data["variables"] = inja::json::array();
+
+        // 3. 收集所有事务和变量
         int total_byte_count = 0;
-        
+        bool is_single_transaction = (transactions.size() == 1);
+
         for (size_t i = 0; i < transactions.size(); i++) {
             inja::json trans_data;
             trans_data["name"] = transactions[i].name;
@@ -233,8 +126,9 @@ namespace picker { namespace codegen {
             trans_data["filepath"] = transactions[i].filepath;
             trans_data["variables"] = inja::json::array();
 
-            int trans_byte_count = 0;
             int trans_byte_offset = 0;
+            int trans_byte_count = 0;
+
             for (const auto &param : transactions[i].parameters) {
                 inja::json parameter;
                 parameter["nums"] = param.byte_count;
@@ -242,80 +136,87 @@ namespace picker { namespace codegen {
                 parameter["macro"] = param.is_marcro;
                 parameter["name"] = param.name;
                 parameter["macro_name"] = param.macro_name;
-                // Removed redundant start_index/end_index fields
-                parameter["transaction_name"] = transactions[i].name;  // For DUT class generation
-                parameter["byte_offset"] = trans_byte_offset;
 
-                // Assign struct format character based on byte alignment
-                switch(param.byte_count) {
-                    case 1:
-                        parameter["struct_fmt"] = "B";  // unsigned char
-                        parameter["is_standard_aligned"] = true;
-                        break;
-                    case 2:
-                        parameter["struct_fmt"] = "H";  // unsigned short
-                        parameter["is_standard_aligned"] = true;
-                        break;
-                    case 4:
-                        parameter["struct_fmt"] = "I";  // unsigned int
-                        parameter["is_standard_aligned"] = true;
-                        break;
-                    case 8:
-                        parameter["struct_fmt"] = "Q";  // unsigned long long
-                        parameter["is_standard_aligned"] = true;
-                        break;
-                    default:
-                        parameter["struct_fmt"] = "";   // Non-standard alignment, needs special handling
-                        parameter["is_standard_aligned"] = false;
-                        break;
+                if (!is_single_transaction) {
+                    parameter["transaction_name"] = transactions[i].name;
                 }
 
+                // 计算字段元数据
+                compute_field_metadata(parameter, trans_byte_offset);
+
                 trans_data["variables"].push_back(parameter);
-                data["variables"].push_back(parameter);  // Add to flattened list
+                data["variables"].push_back(parameter);
                 trans_byte_count += param.byte_count;
-                trans_byte_offset += param.byte_count;
             }
 
             trans_data["byte_stream_count"] = trans_byte_count;
             total_byte_count += trans_byte_count;
+
+            // Always add to transactions array for unified template
             data["transactions"].push_back(trans_data);
         }
-        
+
         data["byte_stream_count"] = total_byte_count;
-        data["transaction_count"] = transactions.size();
-        
+        data["transaction_count"] = is_single_transaction ? 0 : transactions.size();
+
+        // 单事务模式：添加额外字段
+        if (is_single_transaction) {
+            data["filepath"] = transactions[0].filepath;
+            data["className"] = transactions[0].name;  // 使用transaction name而不是package name
+        }
+
+        // 4. 生成核心package文件
         std::string template_path = picker::get_template_path();
+        std::string agent_name = is_single_transaction ?
+            transactions[0].name : package_name;
 
-        // Generate unified SV agent with all transactions in package
-        gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + dut_name + "_xagent.sv");
+        gen_uvm_code(data, template_path + "/uvm/xagent.py",
+                     pkgFolder + "/xagent.py");
+        gen_uvm_code(data, template_path + "/uvm/xagent.sv",
+                     pkgFolder + "/xagent.sv");
+        gen_uvm_code(data, template_path + "/uvm/__init__.py",
+                     pkgFolder + "/__init__.py");
+        gen_uvm_code(data, template_path + "/uvm/picker_uvm_utils_pkg.sv",
+                     pkgFolder + "/utils_pkg.sv");
 
-        // Generate unified Python agent with all transactions in package
-        gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + dut_name + "_xagent.py");
-        gen_uvm_code(data, template_path + "/uvm/__init__.py", pkgFolder + "/__init__.py");
+        // Note: DUT implementation is now integrated into __init__.py
+        // No separate xdut.py file needed
 
-        // Generate common utility package
-        gen_uvm_code(data, template_path + "/uvm/picker_uvm_utils_pkg.sv", pkgFolder + "/picker_uvm_utils_pkg.sv");
-        
-        // Generate unified DUT class in package
-        if (opts.generate_dut) {
-            gen_uvm_code(data, template_path + "/uvm/xdut.py", pkgFolder + "/" + dut_name + ".py");
-        }
-        
-        // Generate example files in project root (only when -e is used)
+        // 5. 生成example文件（如果需要）
         if (opts.example) {
+            // Python example
             if (opts.generate_dut) {
-                // DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
-                gen_uvm_code(data, template_path + "/uvm/example_dut.sv", topFolder + "/example.sv");
+                gen_uvm_code(data, template_path + "/uvm/example_dut.py",
+                            topFolder + "/example.py");
             } else {
-                // Non-DUT mode with example
-                gen_uvm_code(data, template_path + "/uvm/example.py", topFolder + "/example.py");
-                gen_uvm_code(data, template_path + "/uvm/example.sv", topFolder + "/example.sv");
+                gen_uvm_code(data, template_path + "/uvm/example.py",
+                            topFolder + "/example.py");
             }
-            gen_uvm_code(data, template_path + "/uvm/Makefile", topFolder + "/Makefile");
+
+            // SV example and Makefile
+            gen_uvm_code(data, template_path + "/uvm/example.sv",
+                        topFolder + "/example.sv");
+            gen_uvm_code(data, template_path + "/uvm/Makefile",
+                        topFolder + "/Makefile");
         }
-        
-        std::cout << "generate " + dut_name + " multi-transaction agent successfully." << std::endl;
+
+        std::cout << "generate " + package_name + " code successfully." << std::endl;
+    }
+
+    // ============ Wrapper Functions ============
+
+    // 单事务模式包装函数（保持原有接口兼容）
+    void gen_uvm_param(picker::pack_opts &opts, uvm_transaction_define transaction, std::string filename) {
+        std::string packageName = opts.name.empty() ? filename : opts.name;
+        gen_uvm_unified(opts, {transaction}, {filename}, packageName);
+    }
+
+    // 多事务模式包装函数（保持原有接口兼容）
+    void gen_uvm_multi_param(picker::pack_opts &opts,
+                            const std::vector<uvm_transaction_define> &transactions,
+                            const std::vector<std::string> &filenames,
+                            const std::string &dut_name) {
+        gen_uvm_unified(opts, transactions, filenames, dut_name);
     }
 
 }} // namespace picker::codegen
