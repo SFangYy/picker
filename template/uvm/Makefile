@@ -77,7 +77,7 @@ comp:
 	$(SYSCAN) -Mdir=$(BUILD_DIR) \
 		${XSP_COMM_INCLUDE}/xspcomm/tlm_pbsb.cpp $(BUILD_DIR)/tlmps.cpp
 	@if [ -f example.sv ]; then \
-		$(VLOGAN) +incdir+$(PKG_DIR) example.sv -Mdir=$(BUILD_DIR); \
+		$(VLOGAN) +incdir+$(PKG_DIR) +incdir+.. example.sv -Mdir=$(BUILD_DIR); \
 	else \
 		echo "Error: No example UVM file found!"; \
 		exit 1; \

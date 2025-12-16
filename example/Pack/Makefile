@@ -5,13 +5,13 @@
 PYTHON_INCLUDE:=$(firstword $(shell python3-config --includes))
 XSP_COMM_INCLUDE:="/home/sfangyy/work/uvm/picker/build/dependence/xcomm/include"
 
-# Auto-detect package directory name (looks for *_pkg/)
-PKG_DIR := $(shell find . -maxdepth 1 -type d -name "*_pkg" | head -1 | sed 's|./||')
+# Auto-detect package directory name (exclude uvmpy, build, and hidden dirs)
+PKG_DIR := $(shell find . -maxdepth 1 -type d ! -name "." ! -name ".." ! -name "uvmpy" ! -name "build" ! -name ".*" -printf "%f\n" | grep -v "^$$" | head -1)
 BUILD_DIR := $(PKG_DIR)/build
 
 # Validate package directory exists
 ifeq ($(PKG_DIR),)
-$(error No *_pkg directory found. Run picker pack first.)
+$(error No package directory found. Run picker pack first.)
 endif
 
 # Validate required environment variables
