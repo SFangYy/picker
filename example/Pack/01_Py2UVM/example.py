@@ -6,19 +6,20 @@
 # Version    : v0.1
 
 # Import from the package
-from adder_trans_pkg.adder_trans_xagent import *
+from adder_trans_pkg import Agent, adder_trans
 import random
 
 
 if __name__ == "__main__":
-    
-    # Initialize DUT
-    print("Initializing DUT...")
-    #dut = DUTadder_trans()
-    agent = Agent(send_port="adder_trans", 
-                  receive_port="adder_trans",
-                  receive_function=lambda msg: print(msg))
-    print("✓ DUT initialized successfully\n")
+
+    # Initialize Agent (transactions auto-registered by default)
+    print("Initializing Agent...")
+
+    def monitor_callback(trans_type, trans_obj):
+        print(f"[Monitor] {trans_type}: {trans_obj}")
+
+    agent = Agent(monitor_callback=monitor_callback)
+    print("✓ Agent initialized successfully\n")
     
     
     # Example 1: Basic pin manipulation with Step
@@ -33,7 +34,7 @@ if __name__ == "__main__":
         tr.cin.value = random.randint(1, 10)
         tr.sum.value = i * 30
         tr.cout.value = random.randint(1, 10)
-        tr.send(agent)
+        agent.drive(tr)
 
         agent.run(1)
         

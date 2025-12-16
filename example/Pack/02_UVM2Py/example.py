@@ -6,24 +6,21 @@
 # Version    : v0.1
 
 # Import from the package
-from adder_trans_pkg.adder_trans_xagent import *
+from adder_trans_pkg import Agent, adder_trans
 
 
-def monitor_callback(message):
+def monitor_callback(trans_type, trans_obj):
     """
     Example callback function that gets called after monitor updates.
     This demonstrates how to track and respond to state changes.
     """
-    sequence = adder_trans(message)
-    print(f"  [Monitor Update] {sequence.a.value} + {sequence.b.value} + cin -> {sequence.sum.value} with carry {sequence.cout.value}")
+    print(f"  [Monitor Update] {trans_obj.a.value} + {trans_obj.b.value} + cin -> {trans_obj.sum.value} with carry {trans_obj.cout.value}")
 
 
 if __name__ == "__main__":
-    
-    # Initialize Agent
-    agent = Agent(send_port="adder_trans", 
-                  receive_port="adder_trans",
-                  receive_function=monitor_callback)
+
+    # Initialize Agent (transactions auto-registered by default)
+    agent = Agent(monitor_callback=monitor_callback)
                   
     agent.run(100)
     

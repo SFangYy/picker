@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, '.')
 
 # Import from pack generated package
-from adder_trans_pkg import DUTadder_trans
+from adder_trans import DUTadder_trans
 import random
 
 class input_t:

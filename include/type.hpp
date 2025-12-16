@@ -53,9 +53,9 @@ typedef struct pack_opts {
     std::vector<std::string> rename;
     std::vector<std::string> filelist;
     std::string name;
-    bool example;
-    bool force;
-    bool generate_dut;
+    bool example = false;
+    bool force = false ;
+    bool generate_dut = false;
 } pack_opts;
 
 typedef struct sv_signal_define {
