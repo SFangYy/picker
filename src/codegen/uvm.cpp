@@ -88,18 +88,54 @@ namespace picker { namespace codegen {
             parameter["macro"]       = transaction.parameters[i].is_marcro;
             parameter["name"]        = transaction.parameters[i].name;
             parameter["macro_name"]  = transaction.parameters[i].macro_name;
-            parameter["start_index"] = "0";
-            parameter["end_index"]   = "0";
+            // Removed redundant start_index/end_index fields
             data["variables"].push_back(parameter);
             byte_stream_count += transaction.parameters[i].byte_count;
         }
         data["byte_stream_count"] = byte_stream_count;
+
+        // Enhance: Pre-compute struct format characters and byte offsets for Python serialization
+        int byte_offset = 0;
+        for (auto& param : data["variables"]) {
+            int byte_count = param["nums"];
+            param["byte_offset"] = byte_offset;
+
+            // Assign struct format character based on byte alignment
+            switch(byte_count) {
+                case 1:
+                    param["struct_fmt"] = "B";  // unsigned char
+                    param["is_standard_aligned"] = true;
+                    break;
+                case 2:
+                    param["struct_fmt"] = "H";  // unsigned short
+                    param["is_standard_aligned"] = true;
+                    break;
+                case 4:
+                    param["struct_fmt"] = "I";  // unsigned int
+                    param["is_standard_aligned"] = true;
+                    break;
+                case 8:
+                    param["struct_fmt"] = "Q";  // unsigned long long
+                    param["is_standard_aligned"] = true;
+                    break;
+                default:
+                    param["struct_fmt"] = "";   // Non-standard alignment, needs special handling
+                    param["is_standard_aligned"] = false;
+                    break;
+            }
+
+            byte_offset += byte_count;
+        }
+
         std::string template_path = picker::get_template_path();
-        
+
         // Generate core package files in <name>_pkg/
         gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + packageBaseName + "_xagent.py");
         gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + packageBaseName + "_xagent.sv");
         gen_uvm_code(data, template_path + "/uvm/__init__.py", pkgFolder + "/__init__.py");
+
+        // Generate common utility package
+        gen_uvm_code(data, template_path + "/uvm/picker_uvm_utils_pkg.sv", pkgFolder + "/picker_uvm_utils_pkg.sv");
         
         // Generate DUT class if requested
         if (opts.generate_dut) {
@@ -196,8 +232,9 @@ namespace picker { namespace codegen {
             trans_data["filename"] = filenames[i];
             trans_data["filepath"] = transactions[i].filepath;
             trans_data["variables"] = inja::json::array();
-            
+
             int trans_byte_count = 0;
+            int trans_byte_offset = 0;
             for (const auto &param : transactions[i].parameters) {
                 inja::json parameter;
                 parameter["nums"] = param.byte_count;
@@ -205,15 +242,40 @@ namespace picker { namespace codegen {
                 parameter["macro"] = param.is_marcro;
                 parameter["name"] = param.name;
                 parameter["macro_name"] = param.macro_name;
-                parameter["start_index"] = "0";
-                parameter["end_index"] = "0";
+                // Removed redundant start_index/end_index fields
                 parameter["transaction_name"] = transactions[i].name;  // For DUT class generation
-                
+                parameter["byte_offset"] = trans_byte_offset;
+
+                // Assign struct format character based on byte alignment
+                switch(param.byte_count) {
+                    case 1:
+                        parameter["struct_fmt"] = "B";  // unsigned char
+                        parameter["is_standard_aligned"] = true;
+                        break;
+                    case 2:
+                        parameter["struct_fmt"] = "H";  // unsigned short
+                        parameter["is_standard_aligned"] = true;
+                        break;
+                    case 4:
+                        parameter["struct_fmt"] = "I";  // unsigned int
+                        parameter["is_standard_aligned"] = true;
+                        break;
+                    case 8:
+                        parameter["struct_fmt"] = "Q";  // unsigned long long
+                        parameter["is_standard_aligned"] = true;
+                        break;
+                    default:
+                        parameter["struct_fmt"] = "";   // Non-standard alignment, needs special handling
+                        parameter["is_standard_aligned"] = false;
+                        break;
+                }
+
                 trans_data["variables"].push_back(parameter);
                 data["variables"].push_back(parameter);  // Add to flattened list
                 trans_byte_count += param.byte_count;
+                trans_byte_offset += param.byte_count;
             }
-            
+
             trans_data["byte_stream_count"] = trans_byte_count;
             total_byte_count += trans_byte_count;
             data["transactions"].push_back(trans_data);
@@ -223,13 +285,16 @@ namespace picker { namespace codegen {
         data["transaction_count"] = transactions.size();
         
         std::string template_path = picker::get_template_path();
-        
+
         // Generate unified SV agent with all transactions in package
         gen_uvm_code(data, template_path + "/uvm/xagent.sv", pkgFolder + "/" + dut_name + "_xagent.sv");
-        
+
         // Generate unified Python agent with all transactions in package
         gen_uvm_code(data, template_path + "/uvm/xagent.py", pkgFolder + "/" + dut_name + "_xagent.py");
         gen_uvm_code(data, template_path + "/uvm/__init__.py", pkgFolder + "/__init__.py");
+
+        // Generate common utility package
+        gen_uvm_code(data, template_path + "/uvm/picker_uvm_utils_pkg.sv", pkgFolder + "/picker_uvm_utils_pkg.sv");
         
         // Generate unified DUT class in package
         if (opts.generate_dut) {
