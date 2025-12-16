@@ -5,6 +5,7 @@
 # Version    : {{version}}
 
 from typing import Optional, List, Callable, Dict
+import struct
 
 # Support both standalone and package imports
 try:
@@ -32,18 +33,27 @@ class Agent:
         >>> agent.run(100)  # Drive 100 clock cycles
     """
 
-    def __init__(self, 
-                 send_port: str = "", 
-                 receive_port: str = "", 
+    def __init__(self,
+                 send_port: str = "",
+                 receive_port: str = "",
                  receive_function: Optional[Callable[[bytes], None]] = None) -> None:
         """
         Initialize a TLM port connected to UVM.
-        
+
         Args:
             send_port: Name of the TLM publication port for sending data
             receive_port: Name of the TLM subscription port for receiving data
             receive_function: Callback function to process received sequences
+
+        Raises:
+            ValueError: If receive_port is specified but receive_function is None
         """
+        # Parameter validation: receive_port requires receive_function
+        if receive_port != "" and receive_function is None:
+            raise ValueError(
+                f"receive_function must be provided when receive_port ('{receive_port}') is specified. "
+                "The callback function is required to handle received messages."
+            )
 
         u.tlm_vcs_init("_tlm_pbsb.so", "-no_save")
         if send_port != "":
@@ -103,62 +113,75 @@ class {{className}}:
     def from_msg(self, msg: bytes) -> None:
         """
         Convert message received from UVM to Python transaction.
-        
+
         Args:
             msg: Byte message received from UVM
+
+        Raises:
+            ValueError: If message length is invalid
         """
+        # Boundary check: validate message length
+        expected_length = {{byte_stream_count}}
+        if len(msg) < expected_length:
+            raise ValueError(
+                f"Invalid message length: expected at least {expected_length} bytes, "
+                f"got {len(msg)} bytes"
+            )
+
         {%for data in variables -%}
         {%if data.macro == 1 -%}
         {{data.macro_name}} = {{data.bit_count}}
         {%endif -%}
         {%endfor -%}
-        {% set counter = 0 -%}
-        # Directly deserialize fields without nested function
+        # Optimized deserialization with boundary checking
         {%for data in variables -%}
         {%if data.nums == 1 -%}
-        self.{{data.name}}.value = msg[{{counter}}]
-        {% set counter = counter + 1 -%}
+        self.{{data.name}}.value = msg[{{data.byte_offset}}]
         {%else -%}
-        self.{{data.name}}.value = int.from_bytes(msg[{{counter}}:{%for i in range(data.nums) -%}{% set counter = counter + 1 -%}{%endfor -%}{{counter}}], byteorder='big')
+        self.{{data.name}}.value = int.from_bytes(msg[{{data.byte_offset}}:{{data.byte_offset + data.nums}}], byteorder='big')
         {%endif -%}
         {%endfor %}
     
-    def _serialize_field(self, value: int, bit_count: int) -> str:
+    def to_bytes(self) -> bytes:
         """
-        Serialize a single field to binary string with padding.
-        
-        Args:
-            value: Field value to serialize
-            bit_count: Number of bits for this field
-            
+        Convert transaction to byte stream using optimized serialization.
+
         Returns:
-            Binary string with proper byte alignment
+            Serialized byte stream
+
+        Note:
+            Uses struct.pack for standard-aligned fields (1/2/4/8 bytes) and
+            bytearray with bit operations for non-standard alignments.
         """
-        binary_str = bin(value)[2:].zfill(bit_count)
-        padding = 8 - len(binary_str) % 8
-        if padding != 8:
-            binary_str = '0' * padding + binary_str
-        return binary_str
-    
+        result = bytearray({{byte_stream_count}})
+        offset = 0
+
+        {%- for data in variables %}
+        # {{data.name}}: {{data.bit_count}} bits ({{data.nums}} bytes)
+        value_{{loop.index}} = self.{{data.name}}.value
+        {%- if data.is_standard_aligned %}
+        # Standard-aligned field: use struct.pack
+        struct.pack_into('>{{data.struct_fmt}}', result, offset, value_{{loop.index}})
+        offset += {{data.nums}}
+        {%- else %}
+        # Non-standard alignment: use bit operations
+        for i in range({{data.nums}}):
+            result[offset + i] = (value_{{loop.index}} >> (8 * ({{data.nums}} - 1 - i))) & 0xFF
+        offset += {{data.nums}}
+        {%- endif %}
+        {%- endfor %}
+
+        return bytes(result)
+
     def send(self, env: Agent) -> None:
         """
-        Convert transaction to byte stream and send to UVM.
-        
+        Serialize and send transaction to UVM.
+
         Args:
             env: Agent instance with active send_port
         """
-        # Use list comprehension and join for efficient string concatenation
-        byte_str = ''.join([
-            {%- for data in variables %}
-            self._serialize_field(self.{{data.name}}.value, {{data.bit_count}}){%if not loop.is_last -%},{%endif -%}
-            {%- endfor %}
-        ])
-        
-        # Convert binary string to bytes efficiently
-        byte_list = [int(byte_str[i:i+8], 2).to_bytes(1, 'big') 
-                     for i in range(0, len(byte_str), 8)]
-        byte_stream = b''.join(byte_list)
-        
+        byte_stream = self.to_bytes()
+
         uvm_message = u.tlm_msg()
         uvm_message.from_bytes(byte_stream)
         env.send_port.SendMsg(uvm_message)
@@ -249,41 +272,67 @@ class {{trans.name}}:
             self.from_msg(msg)
     
     def from_msg(self, msg: bytes) -> None:
-        """Deserialize from UVM message."""
+        """
+        Deserialize from UVM message.
+
+        Args:
+            msg: Byte message received from UVM
+
+        Raises:
+            ValueError: If message length is invalid
+        """
+        # Boundary check: validate message length
+        expected_length = {{trans.byte_stream_count}}
+        if len(msg) < expected_length:
+            raise ValueError(
+                f"Invalid message length for {{trans.name}}: expected at least {expected_length} bytes, "
+                f"got {len(msg)} bytes"
+            )
+
         {%- for data in trans.variables %}
         {%- if data.macro == 1 %}
         {{data.macro_name}} = {{data.bit_count}}
         {%- endif %}
         {%- endfor %}
-        {% set counter = 0 -%}
+        # Optimized deserialization with boundary checking
         {%- for data in trans.variables %}
         {%- if data.nums == 1 %}
-        self.{{data.name}}.value = msg[{{counter}}]
-        {% set counter = counter + 1 -%}
+        self.{{data.name}}.value = msg[{{data.byte_offset}}]
         {%- else %}
-        self.{{data.name}}.value = int.from_bytes(msg[{{counter}}:{%- for i in range(data.nums) %}{% set counter = counter + 1 -%}{%- endfor %}{{counter}}], byteorder='big')
+        self.{{data.name}}.value = int.from_bytes(msg[{{data.byte_offset}}:{{data.byte_offset + data.nums}}], byteorder='big')
         {%- endif %}
         {%- endfor %}
-    
-    def _serialize_field(self, value: int, bit_count: int) -> str:
-        """Serialize field to binary string."""
-        binary_str = bin(value)[2:].zfill(bit_count)
-        padding = 8 - len(binary_str) % 8
-        if padding != 8:
-            binary_str = '0' * padding + binary_str
-        return binary_str
-    
+
     def to_bytes(self) -> bytes:
-        """Convert transaction to byte stream."""
-        byte_str = ''.join([
-            {%- for data in trans.variables %}
-            self._serialize_field(self.{{data.name}}.value, {{data.bit_count}}){%- if not loop.is_last -%},{%- endif -%}
-            {%- endfor %}
-        ])
-        
-        byte_list = [int(byte_str[i:i+8], 2).to_bytes(1, 'big') 
-                     for i in range(0, len(byte_str), 8)]
-        return b''.join(byte_list)
+        """
+        Convert transaction to byte stream using optimized serialization.
+
+        Returns:
+            Serialized byte stream
+
+        Note:
+            Uses struct.pack for standard-aligned fields (1/2/4/8 bytes) and
+            bytearray with bit operations for non-standard alignments.
+        """
+        result = bytearray({{trans.byte_stream_count}})
+        offset = 0
+
+        {%- for data in trans.variables %}
+        # {{data.name}}: {{data.bit_count}} bits ({{data.nums}} bytes)
+        value_{{loop.index}} = self.{{data.name}}.value
+        {%- if data.is_standard_aligned %}
+        # Standard-aligned field: use struct.pack
+        struct.pack_into('>{{data.struct_fmt}}', result, offset, value_{{loop.index}})
+        offset += {{data.nums}}
+        {%- else %}
+        # Non-standard alignment: use bit operations
+        for i in range({{data.nums}}):
+            result[offset + i] = (value_{{loop.index}} >> (8 * ({{data.nums}} - 1 - i))) & 0xFF
+        offset += {{data.nums}}
+        {%- endif %}
+        {%- endfor %}
+
+        return bytes(result)
     
     def __repr__(self) -> str:
         """String representation."""
@@ -341,15 +390,19 @@ class UnifiedAgent:
         if send_port_name:
             self._send_ports['{{trans.name}}'] = u.TLMPub(send_port_name)
             self._send_ports['{{trans.name}}'].Connect()
-        
+
         receive_port_name = kwargs.get('receive_port_{{trans.name}}', '{{trans.name}}')
         if receive_port_name and monitor_callback:
+            # Fix closure issue: use functools.partial or create a proper closure
+            def _make_callback(trans_name):
+                return lambda a: self._handle_monitor_msg(trans_name, a.as_bytes())
+
             self._receive_ports['{{trans.name}}'] = u.TLMSub(
-                receive_port_name, 
-                lambda a, tn='{{trans.name}}': self._handle_monitor_msg(tn, a.as_bytes())
+                receive_port_name,
+                _make_callback('{{trans.name}}')
             )
             self._receive_ports['{{trans.name}}'].Connect()
-        
+
         {% endfor %}
     
     def _handle_monitor_msg(self, trans_name: str, msg_bytes: bytes):

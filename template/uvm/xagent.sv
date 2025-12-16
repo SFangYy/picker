@@ -6,6 +6,9 @@
 // Version    : {{version}}
 //==============================================================================//
 
+// Import common utility package for serialization functions
+import picker_uvm_utils_pkg::*;
+
 {% if transaction_count > 0 -%}
 {% for trans in transactions -%}
 //==============================================================================
@@ -14,108 +17,64 @@
 
 class {{trans.name}}_xmonitor extends uvm_monitor;
     `uvm_component_utils({{trans.name}}_xmonitor)
-    
+
     localparam real TIME_UNIT = 1e-12;
     localparam real TRANSPORT_DELAY = 1e-9;
-    parameter int MAX_FIELD_WIDTH = 2048;
-    
+
     uvm_tlm_b_initiator_socket #() out;
     byte unsigned m_transport_data[];
-    byte unsigned m_transport_queue[];
     uvm_tlm_gp m_transport_msg;
     uvm_tlm_time m_delay;
-    bit m_exist_xmonitor;
+    uvm_active_passive_enum m_exist_xmonitor;
     {{trans.name}} m_tr;
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
-        uvm_config_db#(bit)::get(this,"","{{trans.name}}_exist_xmonitor",m_exist_xmonitor);
-        if(m_exist_xmonitor) out = new("out",this);
+        if(!uvm_config_db#(uvm_active_passive_enum)::get(this,"","{{trans.name}}_exist_xmonitor",m_exist_xmonitor))
+            m_exist_xmonitor = UVM_ACTIVE; // Default to active if not configured
+        out = new("out",this);
         m_transport_msg = new;
         m_delay = new("delay", TIME_UNIT);
     endfunction
-    
-    task automatic serialize_field(input bit [MAX_FIELD_WIDTH-1:0] data, input int bit_count, ref byte unsigned transport_array[]);
-        int rem_bits = bit_count % 8;
-        if(rem_bits != 0) begin
-            logic[7:0] byte_buf = 8'b0;
-            for(int i = 0; i < rem_bits; i++) 
-                byte_buf[rem_bits - i - 1] = data[bit_count - 1 - i];
-            transport_array = {transport_array, byte_buf};
-        end
-        for(int i = 0; i < bit_count / 8; i++)
-            transport_array = {transport_array, data[(bit_count - 1 - rem_bits - i*8) -: 8]};
-    endtask
-    
+
     virtual task run_phase(uvm_phase phase);
-        forever #100;
+        // Monitor typically doesn't need an active run_phase unless actively sampling
+        // Remove forever loop to prevent simulation hang
+        // Users can override this method if active monitoring is needed
     endtask
 
     virtual task sequence_send({{trans.name}} tr);
-        send_tr(tr);
-    endtask
-
-    task send_tr({{trans.name}} item);
-        m_transport_data = {};
+        // Optimized serialization using pre-allocated array and utility functions
+        m_transport_data = new[{{trans.byte_stream_count}}];
         {% for data in trans.variables -%}
-        {% if data.nums == 1 -%}
-        m_transport_data = {m_transport_data, item.{{data.name}}};
-        {% else -%}
         {% if data.macro == 1 -%}
-        serialize_field(item.{{data.name}}, {{data.macro_name}}, m_transport_data);
+        serialize_field_inplace(tr.{{data.name}}, {{data.macro_name}}, m_transport_data, {{data.byte_offset}});
         {% else -%}
-        serialize_field(item.{{data.name}}, {{data.bit_count}}, m_transport_data);
-        {% endif -%}
+        serialize_field_inplace(tr.{{data.name}}, {{data.bit_count}}, m_transport_data, {{data.byte_offset}});
         {% endif -%}
         {% endfor -%}
-        m_transport_msg.set_data_length(m_transport_data.size());
+        m_transport_msg.set_data_length({{trans.byte_stream_count}});
         m_transport_msg.set_data(m_transport_data);
         m_delay.set_abstime(0, TRANSPORT_DELAY);
-        if(m_exist_xmonitor) out.b_transport(m_transport_msg, m_delay);
-    endtask
-
-    task send_transaction({{trans.name}} item, logic is_last);
-        byte unsigned l_temp_data[];
-        l_temp_data = {};
-        {% for data in trans.variables -%}
-        {% if data.nums == 1 -%}
-        l_temp_data = {l_temp_data, item.{{data.name}}};
-        {% else -%}
-        {% if data.macro == 1 -%}
-        serialize_field(item.{{data.name}}, {{data.macro_name}}, l_temp_data);
-        {% else -%}
-        serialize_field(item.{{data.name}}, {{data.bit_count}}, l_temp_data);
-        {% endif -%}
-        {% endif -%}
-        {% endfor -%}
-        m_transport_queue = {m_transport_queue, l_temp_data};
-        if(is_last) begin
-            m_transport_msg.set_data_length(m_transport_queue.size());
-            m_transport_msg.set_data(m_transport_queue);
-            if(m_exist_xmonitor) out.b_transport(m_transport_msg, m_delay);
-            m_transport_queue = {};
-        end
+        out.b_transport(m_transport_msg, m_delay);
     endtask
 
 endclass
     
 class {{trans.name}}_xdriver extends uvm_driver;
     `uvm_component_utils({{trans.name}}_xdriver)
-    
+
     localparam real TIME_UNIT = 1e-12;
-    
+
     uvm_tlm_gp m_transport_msg;
     uvm_tlm_time m_delay;
     byte unsigned m_transport_data[];
-    bit m_exist_xdriver;
     uvm_tlm_b_target_socket #({{trans.name}}_xdriver) in;
     {{trans.name}} m_tr;
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
-        if(!uvm_config_db#(bit)::get(this,"","{{trans.name}}_exist_xdriver",m_exist_xdriver))
-            `uvm_fatal("CFGERR", "Could not get monitor or driver type")
-        if(m_exist_xdriver) in = new("in",this);
+        in = new("in",this);
         m_transport_msg = new("transport_msg");
         m_delay = new("delay", TIME_UNIT);
     endfunction
@@ -123,13 +82,16 @@ class {{trans.name}}_xdriver extends uvm_driver;
     virtual task b_transport(uvm_tlm_gp t, uvm_tlm_time delay);
         m_tr = new("tr");
         t.get_data(m_transport_data);
-        {% set counter = 0 -%}
+        // Deserialize using optimized utility functions
         {% for data in trans.variables -%}
         {% if data.nums == 1 -%}
-        m_tr.{{data.name}} = m_transport_data[{{counter}}];
-        {% set counter = counter + 1 -%}
+        m_tr.{{data.name}} = m_transport_data[{{data.byte_offset}}];
         {% else -%}
-        m_tr.{{data.name}} = { {% for i in range(data.nums) -%}m_transport_data[{{counter}}]{% if not loop.is_last %},{% endif %}{% set counter = counter + 1 -%}{% endfor %} };
+        {% if data.macro == 1 -%}
+        m_tr.{{data.name}} = deserialize_field(m_transport_data, {{data.byte_offset}}, {{data.macro_name}});
+        {% else -%}
+        m_tr.{{data.name}} = deserialize_field(m_transport_data, {{data.byte_offset}}, {{data.bit_count}});
+        {% endif -%}
         {% endif -%}
         {% endfor -%}
         delay.reset();
@@ -141,25 +103,24 @@ class {{trans.name}}_xdriver extends uvm_driver;
 endclass
 
 class {{trans.name}}_xagent_config extends uvm_object;
-    string mon_channel_name;
-    string drv_channel_name;
-    uvm_object_wrapper mon_type;
-    uvm_object_wrapper drv_type;
+    // UVM standard configuration using is_active
+    uvm_active_passive_enum is_active = UVM_ACTIVE;  // UVM_ACTIVE: monitor+driver, UVM_PASSIVE: monitor only
+    string channel_name;    // TLM channel name for both monitor and driver
+
+    `uvm_object_utils_begin({{trans.name}}_xagent_config)
+        `uvm_field_enum(uvm_active_passive_enum, is_active, UVM_DEFAULT)
+        `uvm_field_string(channel_name, UVM_DEFAULT)
+    `uvm_object_utils_end
 
     function new(string name = "{{trans.name}}_xagent_config");
         super.new(name);
-        this.mon_channel_name = "{{trans.name}}";
-        this.drv_channel_name = "{{trans.name}}";
+        this.channel_name = "{{trans.name}}";
     endfunction
 endclass
 
 class {{trans.name}}_xagent extends uvm_agent;
-    `uvm_component_utils({{trans.name}}_xagent) 
-    
-    uvm_component mon_inst;
-    uvm_component drv_inst;
-    string mon_channel;
-    string drv_channel;
+    `uvm_component_utils({{trans.name}}_xagent)
+
     {{trans.name}}_xagent_config cfg;
     {{trans.name}}_xmonitor {{trans.name}}_xmon;
     {{trans.name}}_xdriver {{trans.name}}_xdrv;
@@ -168,32 +129,33 @@ class {{trans.name}}_xagent extends uvm_agent;
         super.new(name,parent);
         if (!uvm_config_db#({{trans.name}}_xagent_config)::get(this, "", "{{trans.name}}_xagent_config", cfg))
             `uvm_fatal("CFGERR", "Could not get xagent_config")
-        else if(cfg.mon_type == null && cfg.drv_type == null)
-            `uvm_fatal("CFGERR", "Could not get monitor or driver type")
-        
-        uvm_config_db#(bit)::set(null,"","{{trans.name}}_exist_xmonitor", cfg.mon_type != null);
-        uvm_config_db#(bit)::set(null,"","{{trans.name}}_exist_xdriver", cfg.drv_type != null);
+
+        // Set is_active for monitor (always exists, just needs to know mode for potential internal logic)
+        uvm_config_db#(uvm_active_passive_enum)::set(this, "*", "{{trans.name}}_exist_xmonitor", cfg.is_active);
     endfunction
 
     function void build_phase(uvm_phase phase);
         super.build_phase(phase);
-        if(cfg.mon_type != null) begin
-            mon_channel = $sformatf("%s_sub", cfg.mon_channel_name);
-            mon_inst = cfg.mon_type.create_component(mon_channel, this);
-            $cast({{trans.name}}_xmon, mon_inst);
-        end
-        if(cfg.drv_type != null) begin
-            drv_channel = $sformatf("%s.pub", cfg.drv_channel_name);
-            drv_inst = cfg.drv_type.create_component(drv_channel, this);
-            $cast({{trans.name}}_xdrv, drv_inst);
+        // Monitor always created (both ACTIVE and PASSIVE modes have monitors)
+        {{trans.name}}_xmon = {{trans.name}}_xmonitor::type_id::create($sformatf("%s_sub", cfg.channel_name), this);
+
+        // Driver only created in ACTIVE mode
+        if(cfg.is_active == UVM_ACTIVE) begin
+            {{trans.name}}_xdrv = {{trans.name}}_xdriver::type_id::create($sformatf("%s.pub", cfg.channel_name), this);
         end
     endfunction
 
-    function void connect();
-        if(cfg.mon_type != null)
-            uvmc_tlm #()::connect({{trans.name}}_xmon.out, $sformatf("%s.sub", cfg.mon_channel_name));
-        if(cfg.drv_type != null)
-            uvmc_tlm #()::connect({{trans.name}}_xdrv.in, $sformatf("%s.pub", cfg.drv_channel_name));
+    // Standard UVM connect_phase for TLM connections
+    function void connect_phase(uvm_phase phase);
+        super.connect_phase(phase);
+
+        // Monitor TLM connection (always present)
+        uvmc_tlm #()::connect({{trans.name}}_xmon.out, $sformatf("%s.sub", cfg.channel_name));
+
+        // Driver TLM connection (only in ACTIVE mode)
+        if(cfg.is_active == UVM_ACTIVE) begin
+            uvmc_tlm #()::connect({{trans.name}}_xdrv.in, $sformatf("%s.pub", cfg.channel_name));
+        end
     endfunction
 
 endclass
@@ -203,110 +165,65 @@ endclass
 
 class {{className}}_xmonitor extends uvm_monitor;
     `uvm_component_utils({{className}}_xmonitor)
-    
+
     localparam real TIME_UNIT = 1e-12;
     localparam real TRANSPORT_DELAY = 1e-9;
-    parameter int MAX_FIELD_WIDTH = 2048;
-    
+
     uvm_tlm_b_initiator_socket #() out;
     byte unsigned m_transport_data[];
-    byte unsigned m_transport_queue[];
     uvm_tlm_gp m_transport_msg;
     uvm_tlm_time m_delay;
-    bit m_exist_xmonitor;
+    uvm_active_passive_enum m_exist_xmonitor;
     {{className}} m_tr;
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
-        uvm_config_db#(bit)::get(this,"","{{className}}_exist_xmonitor",m_exist_xmonitor);
-        if(m_exist_xmonitor) out = new("out",this);
+        if(!uvm_config_db#(uvm_active_passive_enum)::get(this,"","{{className}}_exist_xmonitor",m_exist_xmonitor))
+            m_exist_xmonitor = UVM_ACTIVE; // Default to active if not configured
+        out = new("out",this);
         m_transport_msg = new;
         m_delay = new("delay", TIME_UNIT);
     endfunction
-    
-    task automatic serialize_field(input bit [MAX_FIELD_WIDTH-1:0] data, input int bit_count, ref byte unsigned transport_array[]);
-        int rem_bits = bit_count % 8;
-        if(rem_bits != 0) begin
-            logic[7:0] byte_buf = 8'b0;
-            for(int i = 0; i < rem_bits; i++) 
-                byte_buf[rem_bits - i - 1] = data[bit_count - 1 - i];
-            transport_array = {transport_array, byte_buf};
-        end
-        for(int i = 0; i < bit_count / 8; i++)
-            transport_array = {transport_array, data[(bit_count - 1 - rem_bits - i*8) -: 8]};
-    endtask
-    
+
     virtual task run_phase(uvm_phase phase);
-        forever #100;
+        // Monitor typically doesn't need an active run_phase unless actively sampling
+        // Remove forever loop to prevent simulation hang
+        // Users can override this method if active monitoring is needed
     endtask
 
     virtual task sequence_send({{className}} tr);
-        send_tr(tr);
-    endtask
-
-    task send_tr({{className}} item);
-        m_transport_data = {};
+        // Optimized serialization using pre-allocated array and utility functions
+        m_transport_data = new[{{byte_stream_count}}];
         {% for data in variables -%}
-        {% if data.nums == 1 -%}
-        m_transport_data = {m_transport_data, item.{{data.name}}};
-        {% else -%}
         {% if data.macro == 1 -%}
-        serialize_field(item.{{data.name}}, {{data.macro_name}}, m_transport_data);
+        serialize_field_inplace(tr.{{data.name}}, {{data.macro_name}}, m_transport_data, {{data.byte_offset}});
         {% else -%}
-        serialize_field(item.{{data.name}}, {{data.bit_count}}, m_transport_data);
-        {% endif -%}
+        serialize_field_inplace(tr.{{data.name}}, {{data.bit_count}}, m_transport_data, {{data.byte_offset}});
         {% endif -%}
         {% endfor -%}
-        m_transport_msg.set_data_length(m_transport_data.size());
+        m_transport_msg.set_data_length({{byte_stream_count}});
         m_transport_msg.set_data(m_transport_data);
         m_delay.set_abstime(0, TRANSPORT_DELAY);
-        if(m_exist_xmonitor) out.b_transport(m_transport_msg, m_delay);
-    endtask
-
-    task send_transaction({{className}} item, logic is_last);
-        byte unsigned l_temp_data[];
-        l_temp_data = {};
-        {% for data in variables -%}
-        {% if data.nums == 1 -%}
-        l_temp_data = {l_temp_data, item.{{data.name}}};
-        {% else -%}
-        {% if data.macro == 1 -%}
-        serialize_field(item.{{data.name}}, {{data.macro_name}}, l_temp_data);
-        {% else -%}
-        serialize_field(item.{{data.name}}, {{data.bit_count}}, l_temp_data);
-        {% endif -%}
-        {% endif -%}
-        {% endfor -%}
-        for(int i = 0; i < l_temp_data.size(); i++)
-            m_transport_queue = {m_transport_queue, l_temp_data[i]};
-        if(is_last) begin
-            m_transport_msg.set_data_length(m_transport_queue.size());
-            m_transport_msg.set_data(m_transport_queue);
-            if(m_exist_xmonitor) out.b_transport(m_transport_msg, m_delay);
-            m_transport_queue = {};
-        end
+        out.b_transport(m_transport_msg, m_delay);
     endtask
 
 endclass
-    
+
 class {{className}}_xdriver extends uvm_driver;
     `uvm_component_utils({{className}}_xdriver)
-    
+
     localparam real TIME_UNIT = 1e-12;
-    
+
     uvm_tlm_gp m_transport_msg;
     uvm_tlm_time m_delay;
     byte unsigned m_transport_data[];
-    bit m_exist_xdriver;
     uvm_tlm_b_target_socket #({{className}}_xdriver) in;
     {{className}} m_tr;
     {{className}}_xmonitor mon_handle;
 
     function new(string name, uvm_component parent=null);
         super.new(name,parent);
-        if(!uvm_config_db#(bit)::get(this,"","{{className}}_exist_xdriver",m_exist_xdriver))
-            `uvm_fatal("CFGERR", "Could not get monitor or driver type")
-        if(m_exist_xdriver) in = new("in",this);
+        in = new("in",this);
         m_transport_msg = new("transport_msg");
         m_delay = new("delay", TIME_UNIT);
     endfunction
@@ -314,13 +231,16 @@ class {{className}}_xdriver extends uvm_driver;
     virtual task b_transport(uvm_tlm_gp t, uvm_tlm_time delay);
         m_tr = new("tr");
         t.get_data(m_transport_data);
-        {% set counter = 0 -%}
+        // Deserialize using optimized utility functions
         {% for data in variables -%}
         {% if data.nums == 1 -%}
-        m_tr.{{data.name}} = m_transport_data[{{counter}}];
-        {% set counter = counter + 1 -%}
+        m_tr.{{data.name}} = m_transport_data[{{data.byte_offset}}];
         {% else -%}
-        m_tr.{{data.name}} = { {% for i in range(data.nums) -%}m_transport_data[{{counter}}]{% if not loop.is_last %},{% endif %}{% set counter = counter + 1 -%}{% endfor %} };
+        {% if data.macro == 1 -%}
+        m_tr.{{data.name}} = deserialize_field(m_transport_data, {{data.byte_offset}}, {{data.macro_name}});
+        {% else -%}
+        m_tr.{{data.name}} = deserialize_field(m_transport_data, {{data.byte_offset}}, {{data.bit_count}});
+        {% endif -%}
         {% endif -%}
         {% endfor -%}
         delay.reset();
@@ -332,25 +252,24 @@ class {{className}}_xdriver extends uvm_driver;
 endclass
 
 class {{className}}_xagent_config extends uvm_object;
-    string mon_channel_name;
-    string drv_channel_name;
-    uvm_object_wrapper mon_type;
-    uvm_object_wrapper drv_type;
+    // UVM standard configuration using is_active
+    uvm_active_passive_enum is_active = UVM_ACTIVE;  // UVM_ACTIVE: monitor+driver, UVM_PASSIVE: monitor only
+    string channel_name;    // TLM channel name for both monitor and driver
+
+    `uvm_object_utils_begin({{className}}_xagent_config)
+        `uvm_field_enum(uvm_active_passive_enum, is_active, UVM_DEFAULT)
+        `uvm_field_string(channel_name, UVM_DEFAULT)
+    `uvm_object_utils_end
 
     function new(string name = "{{className}}_xagent_config");
         super.new(name);
-        this.mon_channel_name = "{{className}}";
-        this.drv_channel_name = "{{className}}";
+        this.channel_name = "{{className}}";
     endfunction
 endclass
 
 class {{className}}_xagent extends uvm_agent;
-    `uvm_component_utils({{className}}_xagent) 
-    
-    uvm_component mon_inst;
-    uvm_component drv_inst;
-    string mon_channel;
-    string drv_channel;
+    `uvm_component_utils({{className}}_xagent)
+
     {{className}}_xagent_config cfg;
     {{className}}_xmonitor {{className}}_xmon;
     {{className}}_xdriver {{className}}_xdrv;
@@ -359,35 +278,32 @@ class {{className}}_xagent extends uvm_agent;
         super.new(name,parent);
         if (!uvm_config_db#({{className}}_xagent_config)::get(this, "", "{{className}}_xagent_config", cfg))
             `uvm_fatal("CFGERR", "Could not get xagent_config")
-        else if(cfg.mon_type == null && cfg.drv_type == null)
-            `uvm_fatal("CFGERR", "Could not get monitor or driver type")
-        
-        uvm_config_db#(bit)::set(null,"","{{className}}_exist_xmonitor", cfg.mon_type != null);
-        uvm_config_db#(bit)::set(null,"","{{className}}_exist_xdriver", cfg.drv_type != null);
+
+        // Set is_active for monitor (always exists, just needs to know mode for potential internal logic)
+        uvm_config_db#(uvm_active_passive_enum)::set(this, "*", "{{className}}_exist_xmonitor", cfg.is_active);
     endfunction
 
     function void build_phase(uvm_phase phase);
         super.build_phase(phase);
-        if(cfg.mon_type != null) begin
-            mon_channel = $sformatf("%s_sub", cfg.mon_channel_name);
-            mon_inst = cfg.mon_type.create_component(mon_channel, this);
-            $cast({{className}}_xmon, mon_inst);
-        end
-        if(cfg.drv_type != null) begin
-            drv_channel = $sformatf("%s.pub", cfg.drv_channel_name);
-            drv_inst = cfg.drv_type.create_component(drv_channel, this);
-            $cast({{className}}_xdrv, drv_inst);
+        // Monitor always created (both ACTIVE and PASSIVE modes have monitors)
+        {{className}}_xmon = {{className}}_xmonitor::type_id::create($sformatf("%s_sub", cfg.channel_name), this);
+
+        // Driver only created in ACTIVE mode
+        if(cfg.is_active == UVM_ACTIVE) begin
+            {{className}}_xdrv = {{className}}_xdriver::type_id::create($sformatf("%s.pub", cfg.channel_name), this);
         end
     endfunction
 
-    function void connect();
-        if(cfg.mon_type != null) begin
-            mon_channel = $sformatf("%s.sub", cfg.mon_channel_name);
-            uvmc_tlm #()::connect({{className}}_xmon.out, mon_channel);
-        end
-        if(cfg.drv_type != null) begin
-            drv_channel = $sformatf("%s.pub", cfg.drv_channel_name);
-            uvmc_tlm #()::connect({{className}}_xdrv.in, drv_channel);
+    // Standard UVM connect_phase for TLM connections
+    function void connect_phase(uvm_phase phase);
+        super.connect_phase(phase);
+
+        // Monitor TLM connection (always present)
+        uvmc_tlm #()::connect({{className}}_xmon.out, $sformatf("%s.sub", cfg.channel_name));
+
+        // Driver TLM connection (only in ACTIVE mode)
+        if(cfg.is_active == UVM_ACTIVE) begin
+            uvmc_tlm #()::connect({{className}}_xdrv.in, $sformatf("%s.pub", cfg.channel_name));
         end
     endfunction
 

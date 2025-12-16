@@ -11,6 +11,9 @@
 import uvm_pkg::*;
 import uvmc_pkg::*;
 
+// Include common utility package before agents
+`include "{{pkgName}}/picker_uvm_utils_pkg.sv"
+
 {% if length(transactions) > 0 -%}
 // Multi-transaction mode: include all transaction definitions and agents
 {% for trans in transactions -%}
@@ -177,19 +180,25 @@ class example_env extends uvm_env;
     function new (string name = "example_env", uvm_component parent = null);
         super.new(name,parent);
         {% if length(transactions) > 0 -%}
-        // Multi-transaction configs
+        // Multi-transaction configs - use factory override for custom driver types
         {% for trans in transactions -%}
         {{trans.name}}_config = new("{{trans.name}}_config");
-        {{trans.name}}_config.drv_type = example_{{trans.name}}_driver::get_type();
-        {{trans.name}}_config.mon_type = {{trans.name}}_xmonitor::get_type();
+        // Set to UVM_ACTIVE for both monitor and driver (default behavior)
+        {{trans.name}}_config.is_active = UVM_ACTIVE;
         uvm_config_db#({{trans.name}}_xagent_config)::set(this,"{{trans.name}}_agent", "{{trans.name}}_xagent_config", {{trans.name}}_config);
+
+        // Use factory override to replace default driver with example driver
+        set_type_override_by_type({{trans.name}}_xdriver::get_type(), example_{{trans.name}}_driver::get_type());
         {% endfor -%}
         {% else -%}
-        // Single transaction config
+        // Single transaction config - use factory override for custom driver type
         xagent_config = new("xagent_config");
-        xagent_config.drv_type = example_driver::get_type();
-        xagent_config.mon_type = {{className}}_xmonitor::get_type();
+        // Set to UVM_ACTIVE for both monitor and driver (default behavior)
+        xagent_config.is_active = UVM_ACTIVE;
         uvm_config_db#({{className}}_xagent_config)::set(this,"xagent", "{{className}}_xagent_config", xagent_config);
+
+        // Use factory override to replace default driver with example driver
+        set_type_override_by_type({{className}}_xdriver::get_type(), example_driver::get_type());
         {% endif -%}
     endfunction
 
@@ -213,23 +222,23 @@ class example_env extends uvm_env;
         {% if length(transactions) > 0 -%}
         // Connect drivers to monitors for echo back (multi-transaction)
         {% for trans in transactions -%}
-        if ({{trans.name}}_agent.drv_inst != null && {{trans.name}}_agent.mon_inst != null) begin
-            if ($cast({{trans.name}}_drv, {{trans.name}}_agent.drv_inst)) begin
+        if ({{trans.name}}_agent.{{trans.name}}_xdrv != null && {{trans.name}}_agent.{{trans.name}}_xmon != null) begin
+            if ($cast({{trans.name}}_drv, {{trans.name}}_agent.{{trans.name}}_xdrv)) begin
                 {{trans.name}}_drv.mon_handle = {{trans.name}}_agent.{{trans.name}}_xmon;
             end
         end
         {% endfor -%}
-        
+
         // Special connection for ALU: alu_op driver needs access to alu_result monitor
-        if (alu_op_agent.drv_inst != null && alu_result_agent.mon_inst != null) begin
-            if ($cast(alu_op_drv, alu_op_agent.drv_inst)) begin
+        if (alu_op_agent.alu_op_xdrv != null && alu_result_agent.alu_result_xmon != null) begin
+            if ($cast(alu_op_drv, alu_op_agent.alu_op_xdrv)) begin
                 alu_op_drv.result_mon_handle = alu_result_agent.alu_result_xmon;
             end
         end
         {% else -%}
         // Connect driver to monitor for echo back (single transaction)
-        if (xagent.drv_inst != null && xagent.mon_inst != null) begin
-            if ($cast(drv, xagent.drv_inst)) begin
+        if (xagent.{{className}}_xdrv != null && xagent.{{className}}_xmon != null) begin
+            if ($cast(drv, xagent.{{className}}_xdrv)) begin
                 drv.mon_handle = xagent.{{className}}_xmon;
             end
         end
