@@ -40,15 +40,18 @@ namespace picker { namespace codegen {
 
         OutputDirs dirs;
 
+        // Determine base directory
+        fs::path base_dir = opts.target_dir.empty() ? "." : opts.target_dir;
+
         if (opts.example) {
-            // Example mode: create uvmpy/package_name/build structure
-            dirs.top = "uvmpy";
+            // Example mode: create <base_dir>/uvmpy/package_name/build structure
+            dirs.top = base_dir / "uvmpy";
             dirs.package = dirs.top / package_name;
             dirs.build = dirs.package / "build";
         } else {
-            // Normal mode: create package_name/build structure
-            dirs.top = package_name;
-            dirs.package = package_name;
+            // Normal mode: create <base_dir>/package_name/build structure
+            dirs.top = base_dir / package_name;
+            dirs.package = base_dir / package_name;
             dirs.build = dirs.package / "build";
         }
 
@@ -142,12 +145,22 @@ namespace picker { namespace codegen {
         // 1. Setup output directories
         OutputDirs dirs = setup_output_directories(opts, package_name);
 
-        // 2. Generate core files
-        generate_core_files(data, dirs.package);
+        // 2. Fix RTL file path relative to actual output directory
+        inja::json template_data = data;
+        if (!opts.from_rtl_file.empty()) {
+            namespace fs = std::filesystem;
+            fs::path rtl_abs = fs::absolute(opts.from_rtl_file);
+            fs::path output_abs = fs::absolute(dirs.top);
+            fs::path rtl_relative = fs::relative(rtl_abs, output_abs);
+            template_data["rtl_file_path"] = rtl_relative.string();
+        }
 
-        // 3. Generate example files (if requested)
+        // 3. Generate core files
+        generate_core_files(template_data, dirs.package);
+
+        // 4. Generate example files (if requested)
         if (opts.example) {
-            generate_example_files(data, dirs.top, opts.generate_dut);
+            generate_example_files(template_data, dirs.top, opts.generate_dut);
         }
 
         std::cout << "generate " + package_name + " code successfully." << std::endl;

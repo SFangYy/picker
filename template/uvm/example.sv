@@ -23,7 +23,7 @@ import uvmc_pkg::*;
 {% if generate_dut -%}
 `include "{{trans.filepath}}"
 {% else -%}
-`include "../{{trans.filepath}}"
+`include "{{package_name}}/{{trans.filepath}}"
 {% endif -%}
 `include "{{package_name}}/xagent.sv"
 {% endfor -%}
@@ -82,7 +82,6 @@ class {{trans.name}}_driver extends {{trans.name}}_xdriver;
 {% for var in trans.variables -%}
         vif.{{var.name}} = tr.{{var.name}};
 {% endfor -%}
-
         `uvm_info("{{trans.name}}_driver", "DUT inputs driven", UVM_MEDIUM)
     endtask
 
@@ -128,7 +127,6 @@ class {{trans.name}}_monitor extends {{trans.name}}_xmonitor;
 {% for var in trans.variables -%}
             tr.{{var.name}} = vif.{{var.name}};
 {% endfor -%}
-
             // Send sampled transaction back to Python
             sequence_send(tr);
             prev_tr.copy(tr);
@@ -246,7 +244,6 @@ class example_env extends uvm_env;
 {% else -%}
     virtual example_interface vif;
 {% endif -%}
-
     function new (string name = "example_env", uvm_component parent = null);
         super.new(name, parent);
 
@@ -259,6 +256,7 @@ class example_env extends uvm_env;
         // Override default driver with custom implementation
         set_type_override_by_type({{trans.name}}_xdriver::get_type(), {{trans.name}}_driver::get_type());
 {% if generate_dut -%}
+
         // Override default monitor with custom implementation
         set_type_override_by_type({{trans.name}}_xmonitor::get_type(), {{trans.name}}_monitor::get_type());
 {% endif -%}
@@ -275,7 +273,6 @@ class example_env extends uvm_env;
         {{trans.name}}_echo_sub = {{trans.name}}_echo_subscriber::type_id::create("{{trans.name}}_echo_sub", this);
 {% endif -%}
 {% endfor -%}
-
         // Get virtual interface
 {% if generate_dut -%}
         if(!uvm_config_db#(virtual dut_interface)::get(this, "", "vif", vif))
@@ -288,8 +285,8 @@ class example_env extends uvm_env;
 
     function void connect_phase(uvm_phase phase);
         super.connect_phase(phase);
-
 {% if not generate_dut -%}
+
         // Echo-back mode: connect driver to subscriber to monitor
 {% for trans in transactions -%}
         if ({{trans.name}}_agent.{{trans.name}}_xdrv != null && {{trans.name}}_agent.{{trans.name}}_xmon != null) begin
@@ -332,9 +329,9 @@ class example_test extends uvm_test;
     virtual task main_phase(uvm_phase phase);
         phase.raise_objection(this);
 {% if generate_dut -%}
-        `uvm_info("example_test", "UVM test started with DUT, waiting for Python to drive transactions...", UVM_LOW)
+        `uvm_info("example_test", "UVM test started with DUT, waiting for Python to drive transactions...", UVM_LOW);
 {% else -%}
-        `uvm_info("example_test", "UVM test started in echo-back mode, waiting for Python...", UVM_LOW)
+        `uvm_info("example_test", "UVM test started in echo-back mode, waiting for Python...", UVM_LOW);
 {% endif -%}
         #100000;
         phase.drop_objection(this);
@@ -357,7 +354,7 @@ module sv_main;
     // Instantiate DUT (auto-generated from RTL)
     {{module_name}} dut (
 {% for var in variables -%}
-        .{{var.name}}(dif.{{var.name}}){% if loop.index < length(variables) %},{% endif %}
+        .{{var.name}}(dif.{{var.name}}){% if loop.index < length(variables) - 1 %},{% endif %}
 {% endfor %}
     );
 {% else -%}

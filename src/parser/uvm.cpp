@@ -5,6 +5,8 @@
 #include <climits>
 #include <unordered_map>
 #include <fstream>
+#include <regex>
+#include "yaml-cpp/yaml.h"
 
 namespace picker { namespace parser {
 
@@ -293,6 +295,20 @@ namespace picker { namespace parser {
         data[TemplateVars::USE_TYPE] = 1;
         data[TemplateVars::GENERATE_DUT] = generate_dut;
 
+        // Get xspcomm library locations
+        std::string error_message;
+        auto xspcomm_include = picker::get_xcomm_lib("include", error_message);
+        if (xspcomm_include.empty()) {
+            PK_FATAL("Failed to get xspcomm include path: %s", error_message.c_str());
+        }
+        data["__XSPCOMM_INCLUDE__"] = xspcomm_include;
+
+        auto xspcomm_python = picker::get_xcomm_lib("python", error_message);
+        if (xspcomm_python.empty()) {
+            PK_FATAL("Failed to get xspcomm python path: %s", error_message.c_str());
+        }
+        data["__XSPCOMM_PYTHON__"] = xspcomm_python;
+
         // Setup RTL file path
         if (!rtl_file_path.empty()) {
             std::filesystem::path rtl_abs = std::filesystem::absolute(rtl_file_path);
@@ -383,11 +399,94 @@ namespace picker { namespace parser {
         return transaction;
     }
 
+    /// Helper: Check if a pin name should be excluded based on filter patterns
+    static bool should_exclude_pin(const std::string& pin_name, 
+                                    const std::vector<std::string>& patterns,
+                                    const std::vector<std::regex>& regexes)
+    {
+        // Check wildcard patterns
+        for (const auto& pattern : patterns) {
+            // Convert wildcard pattern to regex
+            std::string regex_pattern = pattern;
+            // Escape special regex characters except *
+            size_t pos = 0;
+            std::string escaped;
+            for (char c : regex_pattern) {
+                if (c == '*') {
+                    escaped += ".*";
+                } else if (c == '.' || c == '^' || c == '$' || c == '|' || 
+                           c == '(' || c == ')' || c == '[' || c == ']' || 
+                           c == '{' || c == '}' || c == '+' || c == '?') {
+                    escaped += '\\';
+                    escaped += c;
+                } else {
+                    escaped += c;
+                }
+            }
+            
+            try {
+                std::regex wildcard_regex("^" + escaped + "$");
+                if (std::regex_match(pin_name, wildcard_regex)) {
+                    return true;
+                }
+            } catch (const std::regex_error& e) {
+                PK_MESSAGE("Warning: Invalid pattern '%s': %s", pattern.c_str(), e.what());
+            }
+        }
+        
+        // Check regex patterns
+        for (const auto& regex : regexes) {
+            if (std::regex_match(pin_name, regex)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /// Helper: Load pin filter configuration from YAML file
+    static void load_pin_filter(const std::string& filter_file,
+                                std::vector<std::string>& patterns,
+                                std::vector<std::regex>& regexes)
+    {
+        try {
+            YAML::Node config = YAML::LoadFile(filter_file);
+            
+            // Load wildcard patterns
+            if (config["exclude_patterns"]) {
+                for (const auto& node : config["exclude_patterns"]) {
+                    std::string pattern = node.as<std::string>();
+                    patterns.push_back(pattern);
+                    PK_DEBUG("Loaded exclude pattern: %s", pattern.c_str());
+                }
+            }
+            
+            // Load regex patterns
+            if (config["exclude_regex"]) {
+                for (const auto& node : config["exclude_regex"]) {
+                    std::string regex_str = node.as<std::string>();
+                    try {
+                        regexes.emplace_back(regex_str);
+                        PK_DEBUG("Loaded exclude regex: %s", regex_str.c_str());
+                    } catch (const std::regex_error& e) {
+                        PK_MESSAGE("Warning: Invalid regex '%s': %s", regex_str.c_str(), e.what());
+                    }
+                }
+            }
+            
+            PK_MESSAGE("Loaded pin filter: %zu patterns, %zu regexes", patterns.size(), regexes.size());
+            
+        } catch (const YAML::Exception& e) {
+            PK_FATAL("Failed to parse pin filter file '%s': %s", filter_file.c_str(), e.what());
+        }
+    }
+
     /// Parse RTL file and convert to UVM transaction
     uvm_transaction_define parse_rtl_file(
         const std::string& rtl_file_path, 
         std::string& module_name,
-        const std::string& target_module_name)
+        const std::string& target_module_name,
+        const std::string& pin_filter_file)
     {
         PK_MESSAGE("RTL mode: generating transaction from %s", rtl_file_path.c_str());
 
@@ -409,14 +508,39 @@ namespace picker { namespace parser {
         }
 
         // sv() function ensures sv_module_result is not empty if target was specified
-        const auto &target_module = sv_module_result[0];
+        auto target_module = sv_module_result[0];  // Make a copy so we can modify pins
         module_name = target_module.module_name;
 
         PK_MESSAGE("Using module: %s with %d ports",
                    target_module.module_name.c_str(), (int)target_module.pins.size());
 
+        // Apply pin filtering if filter file is provided
+        if (!pin_filter_file.empty()) {
+            std::vector<std::string> patterns;
+            std::vector<std::regex> regexes;
+            
+            load_pin_filter(pin_filter_file, patterns, regexes);
+            
+            size_t original_count = target_module.pins.size();
+            std::vector<picker::sv_signal_define> filtered_pins;
+            
+            for (const auto& pin : target_module.pins) {
+                if (!should_exclude_pin(pin.logic_pin, patterns, regexes)) {
+                    filtered_pins.push_back(pin);
+                } else {
+                    PK_DEBUG("Excluded pin: %s", pin.logic_pin.c_str());
+                }
+            }
+            
+            target_module.pins = filtered_pins;
+            size_t filtered_count = target_module.pins.size();
+            
+            PK_MESSAGE("Pin filtering: %zu pins -> %zu pins (excluded %zu pins)",
+                       original_count, filtered_count, original_count - filtered_count);
+        }
+
         if (target_module.pins.empty()) {
-            PK_MESSAGE("Warning: Module %s has no ports", target_module.module_name.c_str());
+            PK_MESSAGE("Warning: Module %s has no ports after filtering", target_module.module_name.c_str());
         }
 
         // Convert RTL to transaction definition

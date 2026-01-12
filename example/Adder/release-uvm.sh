@@ -12,7 +12,7 @@ fi
 
 rm -rf picker_out_adder/
 
-./build/bin/picker pack --from-rtl example/Adder/Adder.v -n Adder -d -e
+./build/bin/picker pack --from-rtl example/Adder/Adder.v --sname Adder -d -e
 
 rm -rf uvmpy/example.sv
 rm -rf uvmpy/example.py

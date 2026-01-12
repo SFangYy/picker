@@ -1,6 +1,6 @@
 PYTHON_INCLUDE:=$(firstword $(shell python3-config --includes))
-XSP_COMM_INCLUDE:=$(shell picker --show_xcom_lib_location_cpp | awk '/Include:/ {print $$2}')
-XSP_PYTHON:=$(shell picker --show_xcom_lib_location_python | sed -n '$$p')
+XSP_COMM_INCLUDE:={{__XSPCOMM_INCLUDE__}}
+XSP_PYTHON:={{__XSPCOMM_PYTHON__}}
 # Path management for optimized _pkg structure
 # Project structure:
 #   uvmpy/                       (CURDIR, project root,use -e to generate)
@@ -106,9 +106,10 @@ copy_xspcomm:
 	@cp -r ${XSP_PYTHON}/xspcomm $(PKG_DIR)/xspcomm
 
 # Run example (auto-detect DUT mode or non-DUT mode)
+# Note: LD_PRELOAD is handled automatically by package __init__.py
 run:
 	@if [ -f example.py ]; then \
-		cd $(PKG_DIR) && LD_PRELOAD=./_tlm_pbsb.so python3 ../example.py; \
+		cd $(TOP_DIR) && LD_PRELOAD=$(PKG_DIR)/_tlm_pbsb.so python3 example.py; \
 	else \
 		echo "Error: No example file found (example.py)!"; \
 		exit 1; \

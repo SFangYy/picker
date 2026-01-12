@@ -7,13 +7,14 @@
 //==============================================================================
 
 class {{ class_name }} extends uvm_sequence_item;
-{% for data in variables -%}
+    {% for data in variables -%}
     rand bit{% if data.bit_count > 1 %} [{{ data.bit_count - 1 }}:0]{% endif %} {{ data.name }};  // auto-generated from RTL port
-{% endfor %}
+    {% endfor %}
+
     `uvm_object_utils_begin({{ class_name }})
-{% for data in variables -%}
+        {% for data in variables -%}
         `uvm_field_int({{ data.name }}, UVM_ALL_ON)
-{% endfor -%}
+        {% endfor -%}
     `uvm_object_utils_end
 
     function new(string name = "{{ class_name }}");

@@ -44,7 +44,8 @@ namespace picker { namespace parser {
     uvm_transaction_define parse_rtl_file(
         const std::string& rtl_file_path,
         std::string& module_name,
-        const std::string& target_module_name = "");
+        const std::string& target_module_name = "",
+        const std::string& pin_filter_file = "");
 
     uvm_transaction_define sv_module_to_uvm_transaction(const sv_module_define &module);
     uvm_parameter sv_signal_to_uvm_parameter(const sv_signal_define &signal);
