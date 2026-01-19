@@ -12,6 +12,19 @@ UVM transaction-based communication package.
 
 __version__ = "{{version}}"
 
+# ============================================================================
+# Common imports for both DUT and Agent modes
+# ============================================================================
+try:
+    from . import tlm_pbsb as u
+    from . import xspcomm as xsp
+    from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
+except ImportError as e:
+    import sys
+    print(f"Error: Failed to import required modules: {e}", file=sys.stderr)
+    print("Make sure tlm_pbsb, xspcomm, and xagent modules are properly installed.", file=sys.stderr)
+    raise
+
 {% if generate_dut -%}
 # ============================================================================
 # DUT Mode: Integrated __init__.py with DUT implementation
@@ -26,7 +39,8 @@ import subprocess
 # ============================================================================
 # Unified Initialization: Path handling + LD_PRELOAD
 # ============================================================================
-# Always calculate paths and prepare environment
+{% if __SIMULATOR__ == "vcs" %}
+# VCS Mode: Auto LD_PRELOAD handling
 dut_dir = os.path.dirname(os.path.abspath(__file__))
 so_path = os.path.join(dut_dir, '_tlm_pbsb.so')
 
@@ -68,18 +82,7 @@ if '_LD_PRELOAD_HANDLED' not in os.environ and os.environ.get('SKIP_LD_PRELOAD')
             os._exit(result.returncode if result.returncode >= 0 else 1)
         else:
             os.execve(sys.executable, [sys.executable] + new_args, env)
-
-try:
-    from . import tlm_pbsb as u
-    from . import xspcomm as xsp
-except ImportError:
-    import tlm_pbsb as u
-    import xspcomm as xsp
-
-
-# ==================== Agent and Transaction Classes ====================
-# Import from xagent module
-from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
+{% endif %}
 
 
 # ==================== DUT Implementation ====================
@@ -413,15 +416,6 @@ __all__ = [
 # ============================================================================
 # Agent Mode: Standard modular imports
 # ============================================================================
-
-try:
-    from . import tlm_pbsb as u
-    from . import xspcomm as xsp
-    from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
-except ImportError as e:
-    import warnings
-    warnings.warn(f"Could not import components: {e}")
-    raise
 
 # Public API for Agent mode
 __all__ = [

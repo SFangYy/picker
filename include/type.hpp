@@ -54,6 +54,7 @@ typedef struct pack_opts {
     std::vector<std::string> filelist;
     std::string sname;
     std::string target_dir;
+    std::string sim;
     bool example;
     bool force;
     bool generate_dut;

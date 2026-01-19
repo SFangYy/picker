@@ -160,6 +160,10 @@ int set_options_pack_message(CLI::App &top_app)
 {
     auto app = top_app.add_subcommand("pack", "Pack UVM transaction as a UVM agent and Python class");
 
+    // Set simulator type
+    app->add_option("--sim", pack_opts.sim, "vcs, gsim or verilator as simulator, default is verilator")
+        ->default_val("vcs");
+
     // Set DUT RTL Source File, Required
     app->add_flag("-e,--example", pack_opts.example, "Generate example project based on transaction, default is OFF")
         ->default_val(false);
@@ -465,7 +469,8 @@ int main(int argc, char **argv)
             filenames,
             package_name,
             pack_opts.generate_dut,
-            pack_opts.from_rtl_file
+            pack_opts.from_rtl_file,
+            pack_opts.sim
         );
 
         // Generate UVM package files

@@ -285,7 +285,8 @@ namespace picker { namespace parser {
         const std::vector<std::string>& filenames,
         const std::string& package_name,
         bool generate_dut,
-        const std::string& rtl_file_path)
+        const std::string& rtl_file_path,
+        const std::string& simulator)
     {
         inja::json data;
         // Basic package info
@@ -294,6 +295,7 @@ namespace picker { namespace parser {
         data[TemplateVars::DATE_NOW] = transactions[0].data_now;
         data[TemplateVars::USE_TYPE] = 1;
         data[TemplateVars::GENERATE_DUT] = generate_dut;
+        data["__SIMULATOR__"] = simulator;
 
         // Get xspcomm library locations
         std::string error_message;

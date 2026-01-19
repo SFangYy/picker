@@ -64,7 +64,8 @@ namespace picker { namespace parser {
         const std::vector<std::string>& filenames,
         const std::string& package_name,
         bool generate_dut,
-        const std::string& rtl_file_path = "");
+        const std::string& rtl_file_path,
+        const std::string& simulator);
 
     // Unified entry point for UVM package data preparation
     inja::json parse_and_prepare_package(const pack_opts& opts);
