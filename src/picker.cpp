@@ -160,6 +160,10 @@ int set_options_pack_message(CLI::App &top_app)
 {
     auto app = top_app.add_subcommand("pack", "Pack UVM transaction as a UVM agent and Python class");
 
+    // Set simulator type
+    app->add_option("--sim", pack_opts.sim, "vcs, gsim or verilator as simulator, default is verilator")
+        ->default_val("vcs");
+
     // Set DUT RTL Source File, Required
     app->add_flag("-e,--example", pack_opts.example, "Generate example project based on transaction, default is OFF")
         ->default_val(false);
@@ -172,13 +176,20 @@ int set_options_pack_message(CLI::App &top_app)
 
     app->add_option("--from-rtl", pack_opts.from_rtl_file, "RTL source file (.v/.sv) to auto-generate transaction from module ports");
 
+    app->add_option("-p,--pin-filter", pack_opts.pin_filter_file, "Pin filter config file (YAML) to exclude specific pins when parsing RTL");
+
     app->add_option("file", pack_opts.files, "Sv source file, contain the transaction define");
 
     app->add_option("-r,--rename", pack_opts.rename, "Rename transaction name in picker generate code");
     
     app->add_option("-f,--filelist", pack_opts.filelist, "File list containing transaction files");
     
-    app->add_option("-n,--name", pack_opts.name, "Name for the generated package (default: auto-generated from files)");
+    app->add_option("--sname,--source_module_name", pack_opts.sname, "Name for the generated package (default: auto-generated from files)");
+
+    app->add_option(
+           "--tdir,--target_dir", pack_opts.target_dir,
+           "Target directory to store all the results. If it ends with '/' or is empty, \nthe directory name will be the same as the target package name")
+        ->default_val("");
 
     return 0;
 }
@@ -414,7 +425,7 @@ int main(int argc, char **argv)
             PK_MESSAGE("Mode: RTL (auto-generate transaction from module ports)");
 
             std::string module_name;
-            transactions.push_back(picker::parser::parse_rtl_file(pack_opts.from_rtl_file, module_name, pack_opts.name));
+            transactions.push_back(picker::parser::parse_rtl_file(pack_opts.from_rtl_file, module_name, pack_opts.sname, pack_opts.pin_filter_file));
             filenames.push_back(module_name);
 
         } else {
@@ -444,7 +455,7 @@ int main(int argc, char **argv)
             }
         }
 
-        std::string package_name = !pack_opts.name.empty() ? pack_opts.name :
+        std::string package_name = !pack_opts.sname.empty() ? pack_opts.sname :
                                   (!filenames.empty() ? filenames[0] : "");
 
         if (package_name.empty()) {
@@ -458,7 +469,8 @@ int main(int argc, char **argv)
             filenames,
             package_name,
             pack_opts.generate_dut,
-            pack_opts.from_rtl_file
+            pack_opts.from_rtl_file,
+            pack_opts.sim
         );
 
         // Generate UVM package files

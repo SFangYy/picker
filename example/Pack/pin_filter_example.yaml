@@ -1,0 +1,16 @@
+# Pin Filter Configuration Example
+# This file demonstrates how to exclude specific pins when using 'picker pack --from-rtl'
+
+# Wildcard patterns (use * as wildcard)
+exclude_patterns:
+  - "io_in_*"       # Exclude all pins starting with io_in_
+  - "io_out_*"      # Exclude all pins starting with io_out_
+  - "debug_*"       # Exclude all debug pins
+  - "test_mode"     # Exclude specific pin by exact name
+  - "*_unused"      # Exclude all pins ending with _unused
+
+# Regular expression patterns (more powerful matching)
+exclude_regex:
+  - "^io_in_.*$"    # Same as io_in_* but using regex
+  - ".*_debug$"     # Exclude all pins ending with _debug
+  - "^temp_.*_[0-9]+$"  # Exclude pins like temp_data_0, temp_data_1, etc.

@@ -12,6 +12,19 @@ UVM transaction-based communication package.
 
 __version__ = "{{version}}"
 
+# ============================================================================
+# Common imports for both DUT and Agent modes
+# ============================================================================
+try:
+    from . import tlm_pbsb as u
+    from . import xspcomm as xsp
+    from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
+except ImportError as e:
+    import sys
+    print(f"Error: Failed to import required modules: {e}", file=sys.stderr)
+    print("Make sure tlm_pbsb, xspcomm, and xagent modules are properly installed.", file=sys.stderr)
+    raise
+
 {% if generate_dut -%}
 # ============================================================================
 # DUT Mode: Integrated __init__.py with DUT implementation
@@ -23,67 +36,53 @@ import os
 import sys
 import subprocess
 
-# Handle LD_PRELOAD for _tlm_pbsb.so (required for static TLS)
-if '_LD_PRELOAD_HANDLED' not in os.environ:
-    dut_dir = os.path.dirname(os.path.abspath(__file__))
-    so_path = os.path.join(dut_dir, '_tlm_pbsb.so')
+# ============================================================================
+# Unified Initialization: Path handling + LD_PRELOAD
+# ============================================================================
+{% if __SIMULATOR__ == "vcs" %}
+# VCS Mode: Auto LD_PRELOAD handling
+dut_dir = os.path.dirname(os.path.abspath(__file__))
+so_path = os.path.join(dut_dir, '_tlm_pbsb.so')
 
-    # Setup environment
-    env = os.environ.copy()
-    env['LD_PRELOAD'] = so_path if not env.get('LD_PRELOAD') else f"{so_path}:{env['LD_PRELOAD']}"
-    env['_LD_PRELOAD_HANDLED'] = '1'
+# Convert paths to absolute (always do this)
+def _to_abs(arg):
+    if arg.startswith('-'):
+        return arg
+    if '::' in arg:
+        path, test = arg.split('::', 1)
+        return f"{os.path.abspath(path)}::{test}" if os.path.exists(path) else arg
+    return os.path.abspath(arg) if os.path.exists(arg) else arg
 
-    # Convert relative file paths to absolute for pytest arguments
-    def fix_path(arg):
-        if arg.startswith('-') or not ('::' in arg or os.path.exists(arg)):
-            return arg
-        if '::' in arg:
-            path, test = arg.split('::', 1)
-            return f"{os.path.abspath(path)}::{test}" if os.path.exists(path) else arg
-        return os.path.abspath(arg)
+new_args = [_to_abs(arg) for arg in sys.argv]
 
-    new_args = [sys.argv[0]] + [fix_path(arg) for arg in sys.argv[1:]]
-
-    # Check if we need to change directory to Adder (for VCS database files)
-    if os.path.abspath(os.getcwd()) != dut_dir:
-        # Run subprocess in Adder directory
-        result = subprocess.run([sys.executable] + new_args, env=env, cwd=dut_dir,
-                               capture_output=True, text=True)
-
-        # Handle VCS cleanup crashes: if tests passed but process crashed (SIGABRT), treat as success
-        output = result.stdout + result.stderr
-        success = result.returncode < 0 and ' passed' in output and 'PASSED' in output
-
-        print(result.stdout, end='')
-        print(result.stderr, end='', file=sys.stderr)
-        os._exit(0 if success else max(1, result.returncode))
-    else:
-        # Already in correct directory, just restart with LD_PRELOAD
-        os.execve(sys.executable, [sys.executable] + sys.argv, env)
-# Handle LD_PRELOAD for _tlm_pbsb.so
-# if '_LD_PRELOAD_HANDLED' not in os.environ:
-#     so_path = os.path.join(os.path.dirname(__file__), '_tlm_pbsb.so')
-#     env = os.environ.copy()
-#     env['LD_PRELOAD'] = so_path + ':' + env.get('LD_PRELOAD', '') if env.get('LD_PRELOAD') else so_path
-#     env['_LD_PRELOAD_HANDLED'] = '1'
-    
-#     # Restart from Adder directory
-#     dut_dir = os.path.dirname(__file__)
-#     script_path = os.path.abspath(sys.argv[0])
-#     subprocess.run([sys.executable, script_path] + sys.argv[1:], env=env, cwd=dut_dir)
-#     sys.exit(0)
-
-try:
-    from . import tlm_pbsb as u
-    from . import xspcomm as xsp
-except ImportError:
-    import tlm_pbsb as u
-    import xspcomm as xsp
-
-
-# ==================== Agent and Transaction Classes ====================
-# Import from xagent module
-from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
+# Handle LD_PRELOAD and directory switching
+if '_LD_PRELOAD_HANDLED' not in os.environ and os.environ.get('SKIP_LD_PRELOAD') != '1':
+    if os.path.exists(so_path):
+        # Setup environment
+        env = os.environ.copy()
+        env['LD_PRELOAD'] = f"{so_path}:{env.get('LD_PRELOAD', '')}" if env.get('LD_PRELOAD') else so_path
+        env['_LD_PRELOAD_HANDLED'] = '1'
+        env['PYTHONPATH'] = os.path.dirname(dut_dir)
+        
+        # Run in DUT directory if needed
+        if os.path.abspath(os.getcwd()) != dut_dir:
+            is_pytest = 'pytest' in sys.modules or 'PYTEST_CURRENT_TEST' in os.environ
+            result = subprocess.run(
+                [sys.executable] + new_args, env=env, cwd=dut_dir,
+                capture_output=is_pytest, text=is_pytest
+            )
+            
+            if is_pytest:
+                print(result.stdout, end='')
+                print(result.stderr, end='', file=sys.stderr)
+                # Handle VCS crash but tests passed
+                if result.returncode < 0 and ' passed' in (result.stdout + result.stderr):
+                    os._exit(0)
+            
+            os._exit(result.returncode if result.returncode >= 0 else 1)
+        else:
+            os.execve(sys.executable, [sys.executable] + new_args, env)
+{% endif %}
 
 
 # ==================== DUT Implementation ====================
@@ -121,13 +120,12 @@ class DUT{{package_name}}:
     {% for data in variables -%}
     - {{data.name}}: {{data.bit_count}}-bit signal
     {% endfor -%}
-
     Example:
         >>> dut = DUT{{package_name}}()
-        {%- for data in variables %}
+        {%- for data in variables -%}
         {%- if loop.index == 1 %}
         >>> dut.{{data.name}}.value = 10
-        {%- endif %}
+        {%- endif -%}
         {%- endfor %}
         >>> dut.Step(1)
     """
@@ -330,14 +328,76 @@ class DUT{{package_name}}:
         return f"DUT{{package_name}}({', '.join(fields)})"
 
     def RefreshComb(self):
+        """Refresh combinational logic (not supported in pack mode)."""
         self.InitClock()
         print("this function is not supported in pack mode")
 
-    def PauseWaveformDump(self):
-        print("this function is not supported in pack mode")
+    def SetWaveform(self, filename: str):
+        """Set waveform output file (not supported in pack mode)."""
+        print(f"[SetWaveform] Not supported in pack mode. Use VCS +vcdpluson+<filename>")
+
+    def GetWaveFormat(self) -> str:
+        """Get waveform file extension (returns empty string in pack mode)."""
+        return ""
+
+    def FlushWaveform(self):
+        """Flush waveform data to disk (not supported in pack mode)."""
+        print("[FlushWaveform] Not supported in pack mode.")
+
+    def SetCoverage(self, filename: str):
+        """Set coverage output file (not supported in pack mode)."""
+        print(f"[SetCoverage] Not supported in pack mode. Use VCS -cm <metrics>")
+
+    def GetCovMetrics(self) -> int:
+        """Get coverage metrics bitmask (returns 0 in pack mode)."""
+        return 0
 
     def ResumeWaveformDump(self):
-        print("this function is not supported in pack mode")
+        """Resume waveform dumping (not supported in pack mode)."""
+        print("[ResumeWaveformDump] Not supported in pack mode")
+        return 0
+
+    def PauseWaveformDump(self):
+        """Pause waveform dumping (not supported in pack mode)."""
+        print("[PauseWaveformDump] Not supported in pack mode")
+        return 0
+
+    def WaveformPaused(self) -> int:
+        """Check if waveform is paused (returns 0 in pack mode)."""
+        return 0
+
+    def CheckPoint(self, name: str) -> int:
+        """Create simulation checkpoint (not supported in pack mode)."""
+        print(f"[CheckPoint] Not supported in pack mode.")
+        return 1
+
+    def Restore(self, name: str) -> int:
+        """Restore from checkpoint (not supported in pack mode)."""
+        print(f"[Restore] Not supported in pack mode.")
+        return 1
+
+    def GetInternalSignal(self, name: str, index: int = -1, is_array: bool = False, use_vpi: bool = False):
+        """Get internal signal access (not supported in pack mode)."""
+        print(f"[GetInternalSignal] Not supported in pack mode.")
+        return None
+
+    def GetInternalSignalList(self, prefix: str = "", deep: int = 99, use_vpi: bool = False) -> List[str]:
+        """Get internal signal list (not supported in pack mode)."""
+        print(f"[GetInternalSignalList] Not supported in pack mode.")
+        return []
+
+    def VPIInternalSignalList(self, prefix: str = "", deep: int = 99) -> List[str]:
+        """Get internal signal list via VPI (not supported in pack mode)."""
+        print(f"[VPIInternalSignalList] Not supported in pack mode.")
+        return []
+
+    def GetXPort(self):
+        """Get XPort dictionary for all transactions."""
+        return self._xports
+
+    def GetXClock(self):
+        """Get XClock-like object."""
+        return self.xclock
 
 
 # Public API for DUT mode
@@ -356,15 +416,6 @@ __all__ = [
 # ============================================================================
 # Agent Mode: Standard modular imports
 # ============================================================================
-
-try:
-    from . import tlm_pbsb as u
-    from . import xspcomm as xsp
-    from .xagent import Agent, BaseTransaction{% for trans in transactions %}, {{trans.name}}{% endfor %}
-except ImportError as e:
-    import warnings
-    warnings.warn(f"Could not import components: {e}")
-    raise
 
 # Public API for Agent mode
 __all__ = [

@@ -7,9 +7,11 @@
 - [概述](#概述)
 - [快速开始](#快速开始)
 - [核心概念](#核心概念)
+- [命令行参数](#命令行参数)
 - [示例说明](#示例说明)
 - [主要功能](#主要功能)
 - [使用场景](#使用场景)
+- [故障排查](#故障排查)
 
 ---
 
@@ -65,29 +67,39 @@ DUT (硬件设计)
 cd /path/to/picker
 
 # 运行任意示例
-bash example/Pack/release-pack.sh adder    # 完整 DUT 示例
+bash example/Pack/release-pack.sh dut      # 基础示例：生成 DUT 封装
 bash example/Pack/release-pack.sh send     # Python → UVM 单向通信
 bash example/Pack/release-pack.sh recv     # UVM → Python 单向通信
-bash example/Pack/release-pack.sh dut      # 将事物封装为DUT 
 bash example/Pack/release-pack.sh multi    # 多 Transaction 示例
 ```
 
-### 方法二：手动运行示例
+### 方法二：从 Transaction 文件生成
 
-以 05_FullAdderDemo 为例：
+使用已定义的 Transaction 类：
 
 ```bash
-# 1. 使用 --from-rtl 从 RTL 自动生成 Transaction
+# 1. 从 transaction 文件生成 Agent 和 Python 接口
+picker pack example/Pack/adder_trans.sv -d -e
+
+# 2. 进入生成的目录
+cd uvmpy/
+
+# 3. 编译并运行示例
+make clean comp copy_xspcomm run
+```
+
+### 方法三：从 RTL 直接生成（推荐）
+
+无需手写 Transaction，直接从 RTL 模块生成：
+
+```bash
+# 1. 从 RTL 自动生成 Transaction 和验证环境
 picker pack --from-rtl example/Adder/Adder.v -d -e
 
 # 2. 进入生成的目录
 cd uvmpy/
 
-# 3. 复制测试文件
-rm -rf example.{py,sv}
-cp ../example/Pack/05_FullAdderDemo/example.{py,sv} .
-
-# 4. 编译并运行
+# 3. 编译并运行
 make clean comp copy_xspcomm run
 ```
 
@@ -98,6 +110,100 @@ Initialized DUT Adder
 [UVM_INFO] Received from Python: a=0x1234..., b=0x5678..., cin=0
 [UVM_INFO] Sampled: a=0x1234..., b=0x5678... -> sum=0x68ac..., cout=0
 Test Passed, destroy DUT Adder
+```
+
+---
+
+## 命令行参数
+
+### 基本语法
+
+```bash
+picker pack [OPTIONS] [file...]
+```
+
+### 常用参数
+
+| 参数 | 简写 | 说明 | 示例 |
+|------|------|------|------|
+| `--from-rtl <file>` | - | 从 RTL 模块自动生成 Transaction | `--from-rtl design.v` |
+| `-p, --pin-filter <file>` | `-p` | 引脚过滤配置文件（YAML 格式） | `-p filter.yaml` |
+| `-d, --generate-dut` | `-d` | 生成 DUT 封装类（pin-level 接口） | `-d` |
+| `-e, --example` | `-e` | 生成示例测试文件 | `-e` |
+| `-f, --filelist <file>` | `-f` | Transaction 文件列表 | `-f trans.txt` |
+| `-r, --rename <name>` | `-r` | 重命名生成的 Transaction | `-r MyTrans` |
+| `--sname <name>` | - | 指定目标模块名称 | `--sname TopModule` |
+| `--tdir <dir>` | - | 指定输出目录 | `--tdir output/` |
+| `-c, --force` | `-c` | 强制删除已存在的输出目录 | `-c` |
+
+### 使用示例
+
+#### 1. 基础用法：从 Transaction 文件生成
+
+```bash
+# 生成基本的 Agent 和 Python 接口
+picker pack adder_trans.sv
+
+# 生成 DUT 封装类和示例
+picker pack adder_trans.sv -d -e
+```
+
+#### 2. 从 RTL 生成（自动创建 Transaction）
+
+```bash
+# 基础生成
+picker pack --from-rtl design.v -d
+
+# 指定模块名称（如果文件中有多个模块）
+picker pack --from-rtl design.v --sname TopModule -d
+
+# 指定输出目录
+picker pack --from-rtl design.v --tdir my_output/ -d -e
+```
+
+#### 3. 引脚过滤（排除特定引脚）
+
+```bash
+# 创建过滤配置文件
+cat > pin_filter.yaml << EOF
+exclude_patterns:
+  - "io_in_*"
+  - "debug_*"
+exclude_regex:
+  - "^test_.*"
+EOF
+
+# 使用过滤器生成
+picker pack --from-rtl design.v -p pin_filter.yaml -d
+```
+
+**引脚过滤说明：**
+
+- **通配符模式** (`exclude_patterns`): 使用 `*` 匹配任意字符
+  - `io_in_*`: 排除所有 `io_in_` 开头的引脚
+  - `*_test`: 排除所有 `_test` 结尾的引脚
+  - `debug_mode`: 精确匹配特定引脚名
+
+- **正则表达式** (`exclude_regex`): 使用完整的正则表达式语法
+  - `^io_in_.*$`: 排除 io_in_ 开头的引脚
+  - `.*_debug$`: 排除 _debug 结尾的引脚
+  - `^temp_[0-9]+$`: 排除 temp_0, temp_1 等数字结尾的引脚
+
+详细说明请参考：[doc/pin-filter.zh.md](../../doc/pin-filter.zh.md)
+
+#### 4. 多 Transaction 文件
+
+```bash
+# 创建文件列表
+cat > filelist.txt << EOF
+alu_op.sv
+alu_result.sv
+cache_req.sv
+cache_resp.sv
+EOF
+
+# 生成统一的 Package
+picker pack -f filelist.txt --sname ALU -d
 ```
 
 ---
@@ -174,24 +280,50 @@ Cycle N + 1:
 ```
 ---
 
-## 数据流说明
+## 示例说明
+
+本目录包含以下示例：
 
 ### 01_Py2UVM - Python 到 UVM 的单向通信
 
-**场景：** Python 发送数据到 UVM 环境
+**场景：** Python 生成测试激励并发送到 UVM 环境
 
+**文件结构：**
+```
+01_Py2UVM/
+├── example.py    # Python 测试脚本（驱动端）
+└── example.sv    # UVM testbench（接收端）
+```
+
+**运行方式：**
+```bash
+bash example/Pack/release-pack.sh send
+```
+
+**Python 代码示例：**
 ```python
 from adder_trans import Agent, adder_trans
+import random
 
-agent = Agent(monitor_callback=lambda t, o: print(f"Sent: {o}"))
+# 创建 Agent 实例
+agent = Agent()
 
+# Python 驱动 UVM
 for i in range(5):
     tr = adder_trans()
-    tr.a.value = i * 10
-    tr.b.value = i * 20
-    agent.drive(tr)
-    agent.run(1)
+    tr.a.value = random.randint(0, (1 << 128) - 1)
+    tr.b.value = random.randint(0, (1 << 128) - 1)
+    tr.cin.value = random.randint(0, 1)
+    
+    print(f"[Driver] Send to UVM: {tr}")
+    agent.drive(tr)  # 发送到 UVM
+    agent.run(1)     # 推进 1 个时钟周期
 ```
+
+**关键点：**
+- Python 控制测试流程
+- `agent.drive(tr)` 发送数据到 UVM
+- `agent.run(n)` 推进仿真时钟
 
 ---
 
@@ -199,35 +331,148 @@ for i in range(5):
 
 **场景：** UVM 内部生成数据，Python 接收并处理
 
+**文件结构：**
+```
+02_UVM2Py/
+├── example.py    # Python 测试脚本（监控端）
+└── example.sv    # UVM testbench（数据源）
+```
+
+**运行方式：**
+```bash
+bash example/Pack/release-pack.sh recv
+```
+
+**Python 代码示例：**
 ```python
+from adder_trans import Agent
+
+# 定义监控回调函数
 def monitor_callback(trans_type, trans_obj):
-    print(f"Received: {trans_obj.a.value} + {trans_obj.b.value}")
+    print(f"[Monitor] Received from UVM: a={trans_obj.a.value}, "
+          f"b={trans_obj.b.value}, sum={trans_obj.sum.value}")
+    # 可以在这里进行数据分析、验证等
 
 agent = Agent(monitor_callback=monitor_callback)
-agent.run(100)  # 运行 100 个周期，接收 UVM 数据
+
+# 运行仿真，接收 UVM 数据
+agent.run(100)  # 运行 100 个时钟周期
 ```
+
+**关键点：**
+- UVM Monitor 自动采样数据
+- Python 通过回调函数实时接收
+- 适合协议监控、性能分析
 
 ---
 
-### 04_MultiTrans - 多 Transaction 双向通信
+### 03_MultiTrans - 多 Transaction 双向通信
 
 **场景：** 复杂设计中多种数据类型的交互（如 ALU 操作）
 
+**文件结构：**
+```
+03_MultiTrans/
+├── alu_op.sv       # 操作类型 transaction
+├── alu_result.sv   # 结果类型 transaction
+├── filelist.txt    # Transaction 列表
+├── example.py      # Python 测试脚本
+└── example.sv      # UVM testbench
+```
+
+**运行方式：**
+```bash
+bash example/Pack/release-pack.sh multi
+```
+
+**Transaction 定义：**
+```systemverilog
+// alu_op.sv - 输入操作
+class alu_op extends uvm_sequence_item;
+    rand bit [3:0] opcode;      // 操作码
+    rand bit [31:0] operand_a;  // 操作数 A
+    rand bit [31:0] operand_b;  // 操作数 B
+    // ...
+endclass
+
+// alu_result.sv - 输出结果
+class alu_result extends uvm_sequence_item;
+    bit [31:0] result;          // 计算结果
+    bit [3:0] flags;            // 状态标志
+    // ...
+endclass
+```
+
+**Python 代码示例：**
 ```python
-from ALU import DUTALU
+from ALU import DutALU, alu_op, alu_result
 
-dut = DUTALU()
+dut = DutALU()
 
-# 发送操作（alu_op transaction）
-dut.opcode.value = 0      # ADD
-dut.operand_a.value = 10
-dut.operand_b.value = 20
+# 发送操作请求
+for i in range(10):
+    op = alu_op()
+    op.opcode.value = 0x1      # ADD 操作
+    op.operand_a.value = i * 10
+    op.operand_b.value = i * 20
+    
+    dut.drive_alu_op(op)       # 发送操作
+    dut.Step(1)
+    
+    # 接收结果（通过回调或直接读取）
+    result = dut.get_alu_result()
+    print(f"Result: {result.result.value}, Flags: {result.flags.value}")
+```
 
-dut.Step(1)
+**关键点：**
+- 支持多个 Transaction 类型
+- 可以同时发送和接收不同类型的数据
+- 适合复杂协议、总线验证
 
-# 接收结果（alu_result transaction）
-result = dut.result.value    # 30
-status = dut.status.value    # 状态标志
+---
+
+## 数据流说明
+
+### Python → UVM (Drive)
+
+```
+Python 测试脚本
+    |
+    | agent.drive(transaction)
+    |
+    v
+TLM Port (UVMC)
+    |
+    | TLM 通信
+    |
+    v
+UVM xDriver
+    |
+    | virtual interface
+    |
+    v
+DUT 输入端口
+```
+
+### UVM → Python (Monitor)
+
+```
+DUT 输出端口
+    |
+    | virtual interface
+    |
+    v
+UVM xMonitor (采样)
+    |
+    | TLM 通信
+    |
+    v
+TLM Port (UVMC)
+    |
+    | monitor_callback()
+    |
+    v
+Python 回调函数
 ```
 
 ---
@@ -261,61 +506,85 @@ endclass
 - 自动推断位宽
 - 自动生成字段注册宏
 - 减少手动错误
+- 快速原型验证
+
+**指定模块名：**
+```bash
+# 如果 RTL 文件包含多个模块，指定目标模块
+picker pack --from-rtl design.v --sname TopModule -d
+```
 
 ---
 
-### 2. 时钟追踪 (`InitClock`)
+### 2. 引脚过滤 (`-p, --pin-filter`)
 
-**新功能！** 在 Python 中追踪仿真时钟周期：
+在从 RTL 生成时，排除不需要的引脚（如调试信号、测试端口）：
 
-```python
-from adder_trans import Agent
+```yaml
+# pin_filter.yaml
+exclude_patterns:
+  - "io_in_*"       # 排除所有 io_in_ 开头的引脚
+  - "debug_*"       # 排除调试信号
+  - "test_mode"     # 精确匹配
 
-agent = Agent()
+exclude_regex:
+  - "^scan_.*"      # 排除扫描链相关信号
+  - ".*_unused$"    # 排除未使用的信号
+```
 
-# 初始化时钟追踪（默认域）
-agent.InitClock()
-
-# 或指定时钟域和频率
-agent.InitClock(domain="sys_clk", frequency=100e6)
-
-# 运行仿真
-agent.run(100)
-
-# 查询已执行的周期数
-cycles = agent.GetCycleCount()
-print(f"Executed {cycles} cycles")
+```bash
+picker pack --from-rtl design.v -p pin_filter.yaml -d
 ```
 
 **应用场景：**
-- 性能测试（计算操作延迟）
-- 时序验证（确保满足时序约束）
-- 功耗分析（统计活跃周期）
+- 排除时钟/复位信号（由 UVM 环境控制）
+- 过滤调试端口、测试模式信号
+- 简化 Transaction，只保留功能相关引脚
+- 减少不必要的接口复杂度
+
+**输出信息：**
+```
+[PK_MESSAGE] Loaded pin filter: 3 patterns, 2 regexes
+[PK_MESSAGE] Pin filtering: 20 pins -> 12 pins (excluded 8 pins)
+```
 
 ---
 
-### 3. 多 Transaction 支持 (`-f` + `-n`)
+### 3. DUT 封装 (`-d, --generate-dut`)
 
-处理多个 Transaction 文件的复杂设计：
+生成 pin-level 的 DUT 封装类，提供更直观的接口：
 
 ```bash
-# 创建文件列表
-cat > filelist.txt << EOF
-alu_op.sv
-alu_result.sv
-EOF
-
-# 生成统一的 Package
-picker pack -f filelist.txt -n ALU -d
+picker pack adder_trans.sv -d
 ```
 
-**生成结构：**
+**生成的 Python 接口：**
+```python
+from adder_trans import DUTadder_trans
+
+# 创建 DUT 实例
+dut = DUTadder_trans()
+
+# 直接访问引脚（类似 Verilog）
+dut.a.value = 0x12345678
+dut.b.value = 0xABCDEF00
+dut.cin.value = 1
+
+# 推进时钟
+dut.Step(1)
+
+# 读取输出
+result = dut.sum.value
+carry = dut.cout.value
+
+print(f"Sum: 0x{result:x}, Carry: {carry}")
 ```
-ALU/                          # 统一的 Package 名
-├── ALU_trans.sv              # 包含所有 transaction
-├── xagent.sv                 # 支持多类型 transaction 的 Agent
-└── __init__.py               # Python 统一接口
-```
+
+**优势：**
+- 更接近硬件思维方式
+- 适合 pin-level 验证
+- 支持时钟控制
+- 可设置更新回调
 
 ---
 
@@ -325,125 +594,83 @@ ALU/                          # 统一的 Package 名
 
 ```python
 def debug_callback(dut):
-    print(f"[Monitor] a={dut.a.value}, sum={dut.sum.value}")
+    print(f"[Monitor Update] a={dut.a.value}, sum={dut.sum.value}")
 
-dut = DUTAdder()
+dut = DUTadder_trans()
 dut.SetUpdateCallback(debug_callback)
 
 # 每次 Monitor 更新时自动调用 callback
 dut.Step(1)  # 触发回调
 ```
 
+**应用场景：**
+- 实时监控 DUT 状态
+- 调试信号传输
+- 性能分析
+- 波形数据收集
 
 ---
 
-## 使用场景
+### 5. 多 Transaction 支持 (`-f` + `--sname`)
 
-### 场景 1：快速原型验证
-
-**需求：** 新设计的 IP，需要快速验证基本功能
+处理多个 Transaction 文件的复杂设计：
 
 ```bash
-# 1. 从 RTL 生成验证环境
-picker pack --from-rtl my_design.v -d
-
-# 2. 编写 Python 测试（只需几分钟）
-cat > test.py << 'EOF'
-from my_design import DUTmy_design
-import random
-
-dut = DUTmy_design()
-for i in range(1000):
-    dut.input_port.value = random.randint(0, 255)
-    dut.Step(1)
-    # 简单验证
-    assert dut.output_port.value >= 0
-print("Basic test passed!")
+# 创建文件列表
+cat > filelist.txt << EOF
+alu_op.sv
+alu_result.sv
+cache_req.sv
+cache_resp.sv
 EOF
 
-# 3. 运行
-python test.py
+# 生成统一的 Package
+picker pack -f filelist.txt --sname ALU -d
+```
+
+**生成结构：**
+```
+ALU/                          # 统一的 Package 名
+├── ALU_trans.sv              # 包含所有 transaction
+├── xagent.sv                 # 支持多类型 transaction 的 Agent
+├── xdriver.sv                # 多类型 Driver
+├── xmonitor.sv               # 多类型 Monitor
+└── __init__.py               # Python 统一接口
+```
+
+**Python 使用：**
+```python
+from ALU import DutALU, alu_op, alu_result
+
+dut = DutALU()
+
+# 驱动不同类型的 transaction
+dut.drive_alu_op(op_trans)
+dut.drive_cache_req(req_trans)
+
+# 接收不同类型的结果
+result = dut.get_alu_result()
+response = dut.get_cache_resp()
 ```
 
 ---
 
-### 场景 2：大规模随机验证
+### 6. 示例代码生成 (`-e, --example`)
 
-**需求：** 使用 Python 的强大随机库进行约束随机测试
+自动生成完整的测试示例：
 
-```python
-import numpy as np
-from scipy.stats import truncnorm
-
-dut = DUTAdder()
-
-# 使用正态分布生成更真实的激励
-for i in range(100000):
-    # 中间值附近的概率更高
-    a = int(truncnorm.rvs(-2, 2, loc=2**127, scale=2**125))
-    b = int(truncnorm.rvs(-2, 2, loc=2**127, scale=2**125))
-
-    dut.a.value = a & ((1 << 128) - 1)
-    dut.b.value = b & ((1 << 128) - 1)
-    dut.Step(1)
-
-    # 验证...
+```bash
+picker pack --from-rtl design.v -d -e
 ```
+
+**生成内容：**
+- `example.py`: Python 测试脚本模板
+- `example.sv`: UVM testbench 模板
+- `Makefile`: 编译运行脚本
+
+**适合：**
+- 快速入门学习
+- 项目模板生成
+- 参考代码
 
 ---
-
-### 场景 3：机器学习辅助验证
-
-**需求：** 使用 ML 模型预测 DUT 行为或生成智能测试用例
-
-```python
-import torch
-from my_ml_model import DUTPredictor
-
-dut = DUTAdder()
-predictor = DUTPredictor()  # 预训练的神经网络
-
-for i in range(10000):
-    # ML 生成边界测试用例
-    test_case = predictor.generate_edge_case()
-
-    dut.a.value = test_case['a']
-    dut.b.value = test_case['b']
-    dut.Step(1)
-
-    # 收集数据训练模型
-    predictor.collect(test_case, dut.sum.value)
-```
-
----
-
-### 场景 4：协议监控和分析
-
-**需求：** 监控总线协议，生成波形、统计报告
-
-```python
-import matplotlib.pyplot as plt
-
-agent = Agent()
-agent.InitClock(frequency=100e6)
-
-transactions = []
-
-def collect_transaction(trans_type, trans_obj):
-    transactions.append({
-        'cycle': agent.GetCycleCount(),
-        'data': trans_obj.data.value,
-        'valid': trans_obj.valid.value
-    })
-
-agent.monitor_callback = collect_transaction
-agent.run(10000)
-
-# 绘制带宽利用率
-cycles = [t['cycle'] for t in transactions]
-plt.plot(cycles)
-plt.xlabel('Cycle')
-plt.ylabel('Transactions')
-plt.title('Protocol Activity')
-plt.show()
-```

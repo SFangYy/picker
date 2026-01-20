@@ -44,7 +44,8 @@ namespace picker { namespace parser {
     uvm_transaction_define parse_rtl_file(
         const std::string& rtl_file_path,
         std::string& module_name,
-        const std::string& target_module_name = "");
+        const std::string& target_module_name = "",
+        const std::string& pin_filter_file = "");
 
     uvm_transaction_define sv_module_to_uvm_transaction(const sv_module_define &module);
     uvm_parameter sv_signal_to_uvm_parameter(const sv_signal_define &signal);
@@ -63,7 +64,8 @@ namespace picker { namespace parser {
         const std::vector<std::string>& filenames,
         const std::string& package_name,
         bool generate_dut,
-        const std::string& rtl_file_path = "");
+        const std::string& rtl_file_path,
+        const std::string& simulator);
 
     // Unified entry point for UVM package data preparation
     inja::json parse_and_prepare_package(const pack_opts& opts);

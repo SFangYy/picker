@@ -20,7 +20,7 @@ package utils_pkg;
            bit [BIT_COUNT-1:0] picker_tmp_exact; \
            bit [((BIT_COUNT + 7) / 8) * 8 - 1:0] picker_tmp_unpack; \
            {>>{picker_tmp_unpack}} = m_transport_data[OFFSET +: (BIT_COUNT + 7) / 8]; \
-           picker_tmp_exact = picker_tmp_unpack[((BIT_COUNT + 7) / 8) * 8 - 1 -: BIT_COUNT]; \
+           picker_tmp_exact = picker_tmp_unpack[BIT_COUNT-1:0]; \
            {>>{VAR}} = picker_tmp_exact; \
        end
 
@@ -32,7 +32,7 @@ package utils_pkg;
            bit [BIT_COUNT-1:0] picker_tmp_exact; \
            bit [((BIT_COUNT + 7) / 8) * 8 - 1:0] picker_tmp_pack; \
            {>>{picker_tmp_exact}} = VAR; \
-           picker_tmp_pack = {picker_tmp_exact, {((((BIT_COUNT + 7) / 8) * 8) - BIT_COUNT){1'b0}}}; \
+           picker_tmp_pack = { {((((BIT_COUNT + 7) / 8) * 8) - BIT_COUNT){1'b0}}, picker_tmp_exact}; \
            {>>{m_transport_data[OFFSET +: (BIT_COUNT + 7) / 8]}} = picker_tmp_pack; \
        end
 

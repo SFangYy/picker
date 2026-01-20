@@ -36,7 +36,7 @@ if [[ $@ != *"cpp"* ]]; then
 fi
 
 if [[ $@ == *"python"* ]]; then
-    LD_PRELOAD=./Adder/libUTAdder.so python3 example.py
+    python3 example.py
 fi
 
 if [[ $@ == *"scala"* ]]; then

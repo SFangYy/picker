@@ -1,5 +1,29 @@
 #coding=utf8
 
+import os
+import sys
+
+# ============================================================================
+# Auto LD_PRELOAD for VCS Simulation
+# ============================================================================
+{% if __SIMULATOR__ == "vcs" %}
+# Calculate paths and prepare environment for VCS
+dut_dir = os.path.dirname(os.path.abspath(__file__))
+so_path = os.path.join(dut_dir, 'libUT{{__TOP_MODULE_NAME__}}.so')
+
+# Handle LD_PRELOAD (only on first import)
+if '_LD_PRELOAD_HANDLED' not in os.environ and os.path.exists(so_path):
+    current_ld_preload = os.environ.get('LD_PRELOAD', '')
+    if so_path not in current_ld_preload:
+        # Setup environment and re-execute
+        env = os.environ.copy()
+        env['LD_PRELOAD'] = f"{so_path}:{current_ld_preload}" if current_ld_preload else so_path
+        env['_LD_PRELOAD_HANDLED'] = '1'
+        
+        # Re-execute the same command with LD_PRELOAD
+        os.execve(sys.executable, [sys.executable] + sys.argv, env)
+{% endif %}
+
 try:
     from . import xspcomm as xsp
 except Exception as e:
