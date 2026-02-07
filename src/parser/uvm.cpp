@@ -159,19 +159,19 @@ namespace picker { namespace parser {
 
         PK_DEBUG("Running verible command: %s", command.c_str());
 
-        if (std::system(command.c_str()) != 0) {
-            PK_FATAL("Failed to parse %s with verible-verilog-syntax. "
-                     "Ensure verible-verilog-syntax is installed and the file is valid SystemVerilog.",
-                     filename.c_str());
-        }
+        int ret = std::system(command.c_str());
 
-        PK_MESSAGE("Parsed %s.sv successfully", filename.c_str());
+        PK_DEBUG("Verible command returned: %d", ret);
 
         // Read and parse JSON
-        auto json_result = read_file(json_path);
+        std::string json_result;
         nlohmann::json module_json;
+        bool json_valid = false;
+
         try {
+            json_result = read_file(json_path);
             module_json = nlohmann::json::parse(json_result);
+            json_valid = true;
         } catch (const std::exception& e) {
             std::remove(json_path.c_str());  // Cleanup on error
             PK_FATAL("Failed to parse JSON from verible output: %s", e.what());
@@ -180,16 +180,55 @@ namespace picker { namespace parser {
         // Cleanup temp file
         std::remove(json_path.c_str());
 
-        uvm_transaction_define transaction;
-
         // Convert filepath to absolute path to match JSON keys from verible-verilog-syntax
         std::string abs_filepath = fs::absolute(filepath).string();
 
-        if (!module_json.contains(abs_filepath)) {
-            PK_FATAL("JSON output does not contain key for file: %s", abs_filepath.c_str());
+        // Debug: Show available keys in JSON
+        PK_DEBUG("Verible JSON keys available: ");
+        for (auto it = module_json.begin(); it != module_json.end(); ++it) {
+            PK_DEBUG("  - '%s'", it.key().c_str());
         }
 
-        auto module_token = module_json[abs_filepath][VeribleJson::TOKENS];
+        // Find the JSON key - verible may use filename or absolute path
+        std::string json_key;
+        if (module_json.contains(abs_filepath)) {
+            json_key = abs_filepath;
+            PK_DEBUG("Found key using absolute path: '%s'", abs_filepath.c_str());
+        } else {
+            // Try with just the filename
+            std::string just_filename = fs::path(filepath).filename().string();
+            if (module_json.contains(just_filename)) {
+                json_key = just_filename;
+                PK_DEBUG("Found key using filename: '%s'", just_filename.c_str());
+            }
+        }
+
+        // Check if JSON contains valid data even if verible returned non-zero
+        if (ret != 0) {
+            if (!json_valid) {
+                PK_FATAL("Failed to parse %s with verible-verilog-syntax. "
+                         "Ensure verible-verilog-syntax is installed and the file is valid SystemVerilog.",
+                         filename.c_str());
+            }
+            // JSON is valid but verible reported errors (e.g., some syntax issues)
+            // Check if we have the expected keys with tokens data
+            if (json_key.empty()) {
+                PK_FATAL("JSON output does not contain key for file: %s (tried '%s' and '%s')",
+                         filename.c_str(), abs_filepath.c_str(), fs::path(filepath).filename().string().c_str());
+            }
+            if (!module_json[json_key].contains(VeribleJson::TOKENS)) {
+                PK_FATAL("JSON output for %s does not contain tokens data. "
+                         "Verible reported errors but we need valid tokens to proceed.",
+                         filename.c_str());
+            }
+            PK_MESSAGE("Warning: verible-verilog-syntax reported errors for %s.sv, but tokens data is available. Proceeding anyway.", filename.c_str());
+        } else {
+            PK_MESSAGE("Parsed %s.sv successfully", filename.c_str());
+        }
+
+        uvm_transaction_define transaction;
+
+        auto module_token = module_json[json_key][VeribleJson::TOKENS];
 
         // Set basic metadata
         transaction.filepath = filepath;

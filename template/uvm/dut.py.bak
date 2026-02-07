@@ -91,7 +91,6 @@ class _PinWrapper:
     """Wrapper to provide dut.pin.value access instead of dut.pin.xdata.value"""
     def __init__(self, xpin: xsp.XPin):
         self._xpin = xpin
-        self.dirty = False
 
     @property
     def value(self):
@@ -99,9 +98,7 @@ class _PinWrapper:
 
     @value.setter
     def value(self, val):
-        if self._xpin.xdata.value != val:
-            self._xpin.xdata.value = val
-            self.dirty = True
+        self._xpin.xdata.value = val
 
     @property
     def xpin(self):
@@ -136,7 +133,6 @@ class DUT{{package_name}}:
     def __init__(self, **kwargs):
         """Initialize DUT with Agent and xspcomm infrastructure."""
         self._event = xsp.Event()
-        self._is_first_step = True
         self._xports: Dict[str, xsp.XPort] = {}
         self._user_callback: Optional[Callable[['DUT{{package_name}}'], None]] = None
         self._xpins = {}
@@ -196,7 +192,7 @@ class DUT{{package_name}}:
     def Step(self, cycles: int = 1):
         """
         Advance simulation by specified cycles.
-        1. Send current pin values as transactions (only if dirty)
+        1. Send current pin values as transactions
         2. Run simulation
         3. Update pins from monitor
         4. Execute clock callbacks (after monitor update)
@@ -204,26 +200,12 @@ class DUT{{package_name}}:
         for i in range(cycles):
             # Create and drive transactions
             {% for trans in transactions -%}
-            # Check if {{trans.name}} is dirty
-            _is_{{trans.name}}_dirty = self._is_first_step or any([
-                {% for data in trans.variables -%}
-                self.{{data.name}}.dirty,
-                {% endfor -%}
-            ])
-
-            if _is_{{trans.name}}_dirty:
-                tr = {{trans.name}}()
-                {% for data in trans.variables -%}
-                tr.{{data.name}}.value = self._xpins['{{data.name}}'].xdata.value
-                {% endfor -%}
-                self.agent.drive(tr)
-                # Reset dirty flags for pins in this transaction
-                {% for data in trans.variables -%}
-                self.{{data.name}}.dirty = False
-                {% endfor -%}
+            tr = {{trans.name}}()
+            {% for data in trans.variables -%}
+            tr.{{data.name}}.value = self._xpins['{{data.name}}'].xdata.value
             {% endfor -%}
-            
-            self._is_first_step = False
+            self.agent.drive(tr)
+            {% endfor -%}
             self._callback_pending = False
 
             # Run 1 cycle WITHOUT triggering callbacks yet

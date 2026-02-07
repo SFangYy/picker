@@ -49,7 +49,7 @@ init:
 	fi
 	
 build:
-	cmake . -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_PARALLEL=$(NPROC) $(ARGS)
+	cmake . -Bbuild -DCMAKE_BUILD_TYPE=Release -DCMAKE_BUILD_PARALLEL=$(NPROC) -DCMAKE_INSTALL_PREFIX=/home/sfangyy/.local $(ARGS)
 	cd build && $(MAKE) -j$(NPROC)
 
 clean_build:

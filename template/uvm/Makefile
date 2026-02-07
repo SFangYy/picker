@@ -38,7 +38,7 @@ endif
 VERBOSE=+UVM_VERBOSITY=UVM_MEDIUM
 
 SYSCAN  = syscan -cpp g++ -cc gcc -full64 -cflags -g -cflags -DVCS -cflags -I. \
-                -tlm2 -cflags -I${VCS_HOME}/include/systemc232/tlm_utils \
+                -tlm2 -cflags -I${VCS_HOME}/include/systemc234/tlm_utils \
                 -cflags -I${UVMC_HOME}/src/connect/sc ${UVMC_HOME}/src/connect/sc/uvmc.cpp \
                 -cflags -DUSE_VCS -cflags ${PYTHON_INCLUDE} -cflags -I${XSP_COMM_INCLUDE}
 
