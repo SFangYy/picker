@@ -153,6 +153,8 @@ namespace picker { namespace codegen {
             fs::path output_abs = fs::absolute(dirs.top);
             fs::path rtl_relative = fs::relative(rtl_abs, output_abs);
             template_data["rtl_file_path"] = rtl_relative.string();
+        } else {
+            template_data["rtl_file_path"] = "";
         }
 
         // 3. Generate core files

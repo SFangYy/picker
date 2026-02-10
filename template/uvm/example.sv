@@ -18,15 +18,17 @@ import uvmc_pkg::*;
 // Include common utility package before agents
 `include "{{package_name}}/utils_pkg.sv"
 
-// include transaction definitions and agents
+// Include all transaction definitions first
 {% for trans in transactions -%}
 {% if generate_dut -%}
 `include "{{trans.filepath}}"
 {% else -%}
 `include "{{package_name}}/{{trans.filepath}}"
 {% endif -%}
-`include "{{package_name}}/xagent.sv"
 {% endfor -%}
+
+// Include agent (single file containing all transaction agents)
+`include "{{package_name}}/xagent.sv"
 
 {% if generate_dut -%}
 // Interface for DUT signals (auto-generated from transactions)
@@ -82,10 +84,7 @@ class {{trans.name}}_driver extends {{trans.name}}_xdriver;
 {% for var in trans.variables -%}
         vif.{{var.name}} = tr.{{var.name}};
 {% endfor -%}
-<<<<<<< HEAD
 
-=======
->>>>>>> feat_uvm
         `uvm_info("{{trans.name}}_driver", "DUT inputs driven", UVM_MEDIUM)
     endtask
 
@@ -131,10 +130,6 @@ class {{trans.name}}_monitor extends {{trans.name}}_xmonitor;
 {% for var in trans.variables -%}
             tr.{{var.name}} = vif.{{var.name}};
 {% endfor -%}
-<<<<<<< HEAD
-
-=======
->>>>>>> feat_uvm
             // Send sampled transaction back to Python
             sequence_send(tr);
             prev_tr.copy(tr);
@@ -252,10 +247,6 @@ class example_env extends uvm_env;
 {% else -%}
     virtual example_interface vif;
 {% endif -%}
-<<<<<<< HEAD
-
-=======
->>>>>>> feat_uvm
     function new (string name = "example_env", uvm_component parent = null);
         super.new(name, parent);
 
@@ -268,10 +259,6 @@ class example_env extends uvm_env;
         // Override default driver with custom implementation
         set_type_override_by_type({{trans.name}}_xdriver::get_type(), {{trans.name}}_driver::get_type());
 {% if generate_dut -%}
-<<<<<<< HEAD
-=======
-
->>>>>>> feat_uvm
         // Override default monitor with custom implementation
         set_type_override_by_type({{trans.name}}_xmonitor::get_type(), {{trans.name}}_monitor::get_type());
 {% endif -%}
@@ -288,10 +275,6 @@ class example_env extends uvm_env;
         {{trans.name}}_echo_sub = {{trans.name}}_echo_subscriber::type_id::create("{{trans.name}}_echo_sub", this);
 {% endif -%}
 {% endfor -%}
-<<<<<<< HEAD
-
-=======
->>>>>>> feat_uvm
         // Get virtual interface
 {% if generate_dut -%}
         if(!uvm_config_db#(virtual dut_interface)::get(this, "", "vif", vif))
@@ -369,7 +352,7 @@ module sv_main;
     // DUT mode: create DUT interface
     dut_interface dif(clk, rst_n);
 
-{% if trans.from_rtl -%}
+{% if from_rtl -%}
     // Instantiate DUT (auto-generated from RTL)
     {{module_name}} dut (
 {% for var in variables -%}

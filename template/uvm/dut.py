@@ -12,9 +12,66 @@ UVM transaction-based communication package.
 
 __version__ = "{{version}}"
 
+{% if __SIMULATOR__ == "vcs" %}
+# ============================================================================
+# Dynamic VCS Database Handling (Universal Path Support)
+# ============================================================================
+import os
+import sys
+import atexit
+
+# VCS engine expects the database (.daidir) to be in the current working directory.
+# To allow running from any directory, we dynamically create a symlink to the real database.
+package_dir = os.path.dirname(os.path.abspath(__file__))
+so_name = '_tlm_pbsb.so'
+daidir_name = so_name + '.daidir'
+real_daidir_path = os.path.join(package_dir, daidir_name)
+
+# Create a temporary symlink if we are not in the package directory and the link doesn't exist
+if os.path.exists(real_daidir_path) and not os.path.exists(daidir_name):
+    try:
+        os.symlink(real_daidir_path, daidir_name)
+        # Clean up the symlink on exit to keep the user's directory clean
+        atexit.register(lambda: os.path.exists(daidir_name) and os.path.islink(daidir_name) and os.remove(daidir_name))
+    except Exception as e:
+        print(f"Warning: Failed to create symlink for VCS database: {e}", file=sys.stderr)
+        print(f"Simulation might fail if it cannot find '{daidir_name}'.", file=sys.stderr)
+
+# ============================================================================
+# Auto-configure LD_PRELOAD to handle Static TLS limitations
+# ============================================================================
+# The extension library consumes significant Static TLS, which is exhausted 
+# during normal runtime. It MUST be loaded at process startup.
+# We detect this and restart the process with LD_PRELOAD injected.
+if '_LD_PRELOAD_HANDLED' not in os.environ:
+    so_path = os.path.join(package_dir, so_name)
+    if os.path.exists(so_path):
+        env = os.environ.copy()
+        current_preload = env.get('LD_PRELOAD', '')
+        env['LD_PRELOAD'] = f"{so_path}:{current_preload}" if current_preload else so_path
+        env['_LD_PRELOAD_HANDLED'] = '1'
+        
+        # Use sys.orig_argv (Python 3.10+) to ensure -m pytest etc. are preserved
+        args = getattr(sys, 'orig_argv', [sys.executable] + sys.argv)
+        
+        # Restart the process with the new environment
+        try:
+            # Small delay or flush to ensure logs are visible before exec
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.execve(sys.executable, args, env)
+        except Exception as e:
+            print(f"Error: Failed to relaunch with LD_PRELOAD: {e}", file=sys.stderr)
+            sys.exit(1)
+{% endif %}
+
 # ============================================================================
 # Common imports for both DUT and Agent modes
 # ============================================================================
+import ctypes
+# Set dlopen flags to use RTLD_GLOBAL for symbol visibility
+sys.setdlopenflags(sys.getdlopenflags() | ctypes.RTLD_GLOBAL)
+
 try:
     from . import tlm_pbsb as u
     from . import xspcomm as xsp
@@ -32,58 +89,7 @@ except ImportError as e:
 
 from typing import Optional, Callable, Dict, Type, List
 import struct
-import os
-import sys
 import subprocess
-
-# ============================================================================
-# Unified Initialization: Path handling + LD_PRELOAD
-# ============================================================================
-{% if __SIMULATOR__ == "vcs" %}
-# VCS Mode: Auto LD_PRELOAD handling
-dut_dir = os.path.dirname(os.path.abspath(__file__))
-so_path = os.path.join(dut_dir, '_tlm_pbsb.so')
-
-# Convert paths to absolute (always do this)
-def _to_abs(arg):
-    if arg.startswith('-'):
-        return arg
-    if '::' in arg:
-        path, test = arg.split('::', 1)
-        return f"{os.path.abspath(path)}::{test}" if os.path.exists(path) else arg
-    return os.path.abspath(arg) if os.path.exists(arg) else arg
-
-new_args = [_to_abs(arg) for arg in sys.argv]
-
-# Handle LD_PRELOAD and directory switching
-if '_LD_PRELOAD_HANDLED' not in os.environ and os.environ.get('SKIP_LD_PRELOAD') != '1':
-    if os.path.exists(so_path):
-        # Setup environment
-        env = os.environ.copy()
-        env['LD_PRELOAD'] = f"{so_path}:{env.get('LD_PRELOAD', '')}" if env.get('LD_PRELOAD') else so_path
-        env['_LD_PRELOAD_HANDLED'] = '1'
-        env['PYTHONPATH'] = os.path.dirname(dut_dir)
-        
-        # Run in DUT directory if needed
-        if os.path.abspath(os.getcwd()) != dut_dir:
-            is_pytest = 'pytest' in sys.modules or 'PYTEST_CURRENT_TEST' in os.environ
-            result = subprocess.run(
-                [sys.executable] + new_args, env=env, cwd=dut_dir,
-                capture_output=is_pytest, text=is_pytest
-            )
-            
-            if is_pytest:
-                print(result.stdout, end='')
-                print(result.stderr, end='', file=sys.stderr)
-                # Handle VCS crash but tests passed
-                if result.returncode < 0 and ' passed' in (result.stdout + result.stderr):
-                    os._exit(0)
-            
-            os._exit(result.returncode if result.returncode >= 0 else 1)
-        else:
-            os.execve(sys.executable, [sys.executable] + new_args, env)
-{% endif %}
-
 
 # ==================== DUT Implementation ====================
 

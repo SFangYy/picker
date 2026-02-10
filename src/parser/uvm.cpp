@@ -46,7 +46,6 @@ namespace picker { namespace parser {
             parameter.is_macro = 1;
             parameter.macro_name = msb_str;
             if (!macro_path.empty()) {
-                PK_DEBUG("Array bound uses macro: %s (resolution not yet implemented)", msb_str.c_str());
             }
         } else {
             PK_FATAL("Unexpected array bound token: %s", msb_str.c_str());
@@ -384,6 +383,13 @@ namespace picker { namespace parser {
 
         data[TemplateVars::BYTE_STREAM_COUNT] = total_byte_count;
         data[TemplateVars::TRANSACTION_COUNT] = transactions.size();
+
+        // Set from_rtl for all modes (single and multi-transaction)
+        // Check if the first transaction is RTL-generated
+        if (data[TemplateVars::TRANSACTIONS].size() > 0 &&
+            data[TemplateVars::TRANSACTIONS][0].contains(TemplateVars::FROM_RTL)) {
+            data[TemplateVars::FROM_RTL] = data[TemplateVars::TRANSACTIONS][0][TemplateVars::FROM_RTL];
+        }
 
         // Add template shortcuts for single-transaction mode
         if (transactions.size() == 1) {

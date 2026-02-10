@@ -463,6 +463,8 @@ int main(int argc, char **argv)
         }
 
         PK_MESSAGE("Package name: %s", package_name.c_str());
+        std::cerr << "DEBUG: About to call prepare_uvm_package_data..." << std::endl;
+        PK_MESSAGE("About to call prepare_uvm_package_data...");
 
         auto package_data = picker::parser::prepare_uvm_package_data(
             transactions,
@@ -472,6 +474,8 @@ int main(int argc, char **argv)
             pack_opts.from_rtl_file,
             pack_opts.sim
         );
+
+        PK_MESSAGE("prepare_uvm_package_data returned successfully!");
 
         // Generate UVM package files
         picker::codegen::generate_uvm_package(package_data, pack_opts, package_name);
