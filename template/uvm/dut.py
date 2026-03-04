@@ -16,10 +16,12 @@ __version__ = "{{version}}"
 # ============================================================================
 # Dynamic VCS Database Handling (Universal Path Support)
 # ============================================================================
+from typing import Optional, Callable, Dict, Type, List
+import struct
 import os
 import sys
+import subprocess
 import atexit
-
 # VCS engine expects the database (.daidir) to be in the current working directory.
 # To allow running from any directory, we dynamically create a symlink to the real database.
 package_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +34,7 @@ if os.path.exists(real_daidir_path) and not os.path.exists(daidir_name):
     try:
         os.symlink(real_daidir_path, daidir_name)
         # Clean up the symlink on exit to keep the user's directory clean
+        import atexit
         atexit.register(lambda: os.path.exists(daidir_name) and os.path.islink(daidir_name) and os.remove(daidir_name))
     except Exception as e:
         print(f"Warning: Failed to create symlink for VCS database: {e}", file=sys.stderr)
@@ -40,29 +43,25 @@ if os.path.exists(real_daidir_path) and not os.path.exists(daidir_name):
 # ============================================================================
 # Auto-configure LD_PRELOAD to handle Static TLS limitations
 # ============================================================================
-# The extension library consumes significant Static TLS, which is exhausted 
-# during normal runtime. It MUST be loaded at process startup.
-# We detect this and restart the process with LD_PRELOAD injected.
-if '_LD_PRELOAD_HANDLED' not in os.environ:
-    so_path = os.path.join(package_dir, so_name)
-    if os.path.exists(so_path):
-        env = os.environ.copy()
-        current_preload = env.get('LD_PRELOAD', '')
-        env['LD_PRELOAD'] = f"{so_path}:{current_preload}" if current_preload else so_path
-        env['_LD_PRELOAD_HANDLED'] = '1'
+# Check if we need to restart with LD_PRELOAD
+# Skip if already handled (e.g., by checker subprocess mechanism)
+if "_LD_PRELOAD_HANDLED" not in os.environ:
+    so_file_path = os.path.join(package_dir, so_name)
+    current_ld_preload = os.environ.get("LD_PRELOAD", "")
+    
+    # Check if .so file exists and LD_PRELOAD is not set correctly
+    if os.path.exists(so_file_path) and so_file_path not in current_ld_preload:
+        # Need to restart with LD_PRELOAD
+        new_env = os.environ.copy()
+        new_env["LD_PRELOAD"] = so_file_path
+        new_env["_LD_PRELOAD_HANDLED"] = "1"  # Mark as handled to avoid infinite loop
         
-        # Use sys.orig_argv (Python 3.10+) to ensure -m pytest etc. are preserved
-        args = getattr(sys, 'orig_argv', [sys.executable] + sys.argv)
-        
-        # Restart the process with the new environment
+        # Re-execute current process with updated environment
         try:
-            # Small delay or flush to ensure logs are visible before exec
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os.execve(sys.executable, args, env)
+            os.execve(sys.executable, [sys.executable] + sys.argv, new_env)
         except Exception as e:
-            print(f"Error: Failed to relaunch with LD_PRELOAD: {e}", file=sys.stderr)
-            sys.exit(1)
+            print(f"Warning: Failed to restart with LD_PRELOAD: {e}", file=sys.stderr)
+            print("Continuing without LD_PRELOAD - may encounter TLS errors.", file=sys.stderr)
 {% endif %}
 
 # ============================================================================
@@ -82,6 +81,9 @@ except ImportError as e:
     print("Make sure tlm_pbsb, xspcomm, and xagent modules are properly installed.", file=sys.stderr)
     raise
 
+if 'LD_PRELOAD' in os.environ:
+    del os.environ['LD_PRELOAD']
+    
 {% if generate_dut -%}
 # ============================================================================
 # DUT Mode: Integrated __init__.py with DUT implementation
